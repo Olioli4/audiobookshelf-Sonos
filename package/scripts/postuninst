@@ -1,0 +1,32 @@
+#!/bin/sh
+# Post-uninstallation script for Audiobookshelf
+
+LOG_FILE="/tmp/audiobookshelf_install.log"
+
+log() {
+    echo "$1"
+    echo "[postuninst] $(date): $1" >> "$LOG_FILE"
+}
+
+log "========================================"
+log "Post-uninstallation starting..."
+log "Running as user: $(whoami)"
+
+DATA_DIR="/var/packages/audiobookshelf/var"
+
+# Ask about data removal (handled by wizard)
+log "wizard_delete_data: ${wizard_delete_data:-not set}"
+
+if [ "${wizard_delete_data}" = "true" ]; then
+    log "Removing all data from ${DATA_DIR}..."
+    rm -rf "${DATA_DIR}"
+    log "Data removed."
+else
+    log "Keeping user data in ${DATA_DIR}"
+    echo "Keeping user data in ${DATA_DIR}"
+    echo "To completely remove, delete this directory manually."
+fi
+
+log "Uninstallation completed successfully."
+echo "Uninstallation completed."
+exit 0

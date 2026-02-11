@@ -1,0 +1,309 @@
+#!/bin/sh
+# Start/Stop/Status script for Audiobookshelf DSM 7
+
+PACKAGE_NAME="audiobookshelf"
+PACKAGE_DIR="/var/packages/${PACKAGE_NAME}"
+TARGET_DIR="${PACKAGE_DIR}/target"
+DATA_DIR="${PACKAGE_DIR}/var"
+PID_FILE="${DATA_DIR}/audiobookshelf.pid"
+SONOS_PID_FILE="${DATA_DIR}/sonos-http-api.pid"
+LOG_FILE="${DATA_DIR}/logs/audiobookshelf.log"
+SONOS_LOG_FILE="${DATA_DIR}/logs/sonos-http-api.log"
+INSTALL_LOG="/tmp/audiobookshelf_install.log"
+ENV_FILE="${DATA_DIR}/config/.env"
+SONOS_DIR="${TARGET_DIR}/sonos-http-api"
+
+# Logging function
+log() {
+    echo "$1"
+    echo "[start-stop-status] $(date): $1" >> "$INSTALL_LOG"
+}
+
+log "Called with argument: $1"
+log "Running as user: $(whoami)"
+
+# Load environment variables
+if [ -f "${ENV_FILE}" ]; then
+    log "Loading environment from ${ENV_FILE}"
+    # Source the env file properly, handling special characters
+    set -a  # automatically export all variables
+    . "${ENV_FILE}" 2>/dev/null || {
+        # Fallback: manual parsing for problematic files
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+                \#*|'') continue ;;
+                *=*)
+                    key="${line%%=*}"
+                    value="${line#*=}"
+                    # Remove leading/trailing quotes
+                    value="${value#\"}"
+                    value="${value%\"}"
+                    value="${value#\'}"
+                    value="${value%\'}"
+                    export "$key=$value"
+                    ;;
+            esac
+        done < "${ENV_FILE}"
+    }
+    set +a
+    # Debug: log if DB_PASSWORD was loaded
+    if [ -n "$DB_PASSWORD" ]; then
+        log "DB_PASSWORD is set (length: ${#DB_PASSWORD})"
+    else
+        log "WARNING: DB_PASSWORD is not set!"
+    fi
+    # Debug: log SONOS_API_URL
+    log "SONOS_API_URL from env: ${SONOS_API_URL:-not set}"
+    log "SONOS_DIR: $SONOS_DIR"
+    log "SONOS_DIR exists: $([ -d "$SONOS_DIR" ] && echo 'yes' || echo 'no')"
+else
+    log "WARNING: ENV_FILE not found: ${ENV_FILE}"
+fi
+
+# Get Node.js path
+NODE_PATH=""
+if [ -f "/var/packages/Node.js_v18/target/bin/node" ]; then
+    NODE_PATH="/var/packages/Node.js_v18/target/bin/node"
+elif [ -f "/var/packages/Node.js_v20/target/bin/node" ]; then
+    NODE_PATH="/var/packages/Node.js_v20/target/bin/node"
+elif [ -f "/var/packages/Node.js_v16/target/bin/node" ]; then
+    NODE_PATH="/var/packages/Node.js_v16/target/bin/node"
+elif [ -f "/usr/local/bin/node" ]; then
+    NODE_PATH="/usr/local/bin/node"
+elif command -v node > /dev/null 2>&1; then
+    NODE_PATH="node"
+fi
+
+log "NODE_PATH: ${NODE_PATH:-not found}"
+
+# Start Sonos HTTP API
+start_sonos() {
+    log "Starting Sonos HTTP API..."
+    log "SONOS_DIR: $SONOS_DIR"
+    log "Contents of SONOS_DIR:"
+    ls -la "$SONOS_DIR" >> "$INSTALL_LOG" 2>&1 || log "Cannot list SONOS_DIR"
+    
+    # Debug network interfaces for SSDP discovery (read-only, no root needed)
+    log "Network interfaces:"
+    ip addr >> "$INSTALL_LOG" 2>&1 || ifconfig >> "$INSTALL_LOG" 2>&1
+    log "Routing table:"
+    ip route >> "$INSTALL_LOG" 2>&1 || route >> "$INSTALL_LOG" 2>&1
+    
+    # Note: Multicast routing for SSDP discovery may require DSM firewall configuration
+    # Go to Control Panel -> Security -> Firewall -> Edit Rules -> Allow multicast
+    
+    if [ ! -d "$SONOS_DIR" ]; then
+        log "Sonos HTTP API directory not found at $SONOS_DIR, skipping..."
+        return 0
+    fi
+    
+    if [ ! -f "$SONOS_DIR/server.js" ]; then
+        log "Sonos HTTP API server.js not found at $SONOS_DIR/server.js, skipping..."
+        return 0
+    fi
+    
+    # Check if already running
+    if [ -f "$SONOS_PID_FILE" ]; then
+        PID=$(cat "$SONOS_PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            log "Sonos HTTP API already running (PID: $PID)"
+            return 0
+        fi
+    fi
+    
+    cd "$SONOS_DIR"
+    log "Sonos node_modules exists: $([ -d "node_modules" ] && echo 'yes' || echo 'no')"
+    log "Starting Sonos with: $NODE_PATH server.js"
+    
+    # Set DEBUG for sonos-discovery to see SSDP activity
+    export DEBUG="sonos-discovery:*"
+    nohup "$NODE_PATH" server.js >> "$SONOS_LOG_FILE" 2>&1 &
+    echo $! > "$SONOS_PID_FILE"
+    log "Sonos PID written: $(cat $SONOS_PID_FILE 2>/dev/null || echo 'failed')"
+    
+    sleep 2
+    
+    if [ -f "$SONOS_PID_FILE" ]; then
+        PID=$(cat "$SONOS_PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            log "Sonos HTTP API started (PID: $PID)"
+            # Auto-configure SONOS_API_URL if not set
+            if [ -z "$SONOS_API_URL" ]; then
+                export SONOS_API_URL="http://localhost:5005"
+                log "Set SONOS_API_URL=http://localhost:5005"
+            fi
+            return 0
+        fi
+    fi
+    
+    log "WARNING: Failed to start Sonos HTTP API"
+    return 0  # Don't fail audiobookshelf if sonos fails
+}
+
+# Stop Sonos HTTP API
+stop_sonos() {
+    log "Stopping Sonos HTTP API..."
+    
+    if [ -f "$SONOS_PID_FILE" ]; then
+        PID=$(cat "$SONOS_PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            log "Sending SIGTERM to Sonos (PID: $PID)"
+            kill $PID
+            sleep 1
+            if kill -0 $PID 2>/dev/null; then
+                kill -9 $PID
+            fi
+        fi
+        rm -f "$SONOS_PID_FILE"
+    fi
+    
+    log "Sonos HTTP API stopped."
+}
+
+start_daemon() {
+    log "Starting Audiobookshelf..."
+    
+    if [ -z "$NODE_PATH" ]; then
+        log "ERROR: Node.js not found!"
+        echo "Node.js not found! Please install Node.js from Package Center."
+        return 1
+    fi
+    
+    # Start Sonos HTTP API first (if available)
+    start_sonos
+    
+    # Check if already running
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            log "Already running (PID: $PID)"
+            echo "Audiobookshelf is already running (PID: $PID)"
+            return 0
+        fi
+    fi
+    
+    # Create log directory
+    mkdir -p "${DATA_DIR}/logs" 2>/dev/null
+    
+    # Set environment variables
+    export NODE_ENV=production
+    export CONFIG_PATH="${DATA_DIR}/config"
+    export METADATA_PATH="${DATA_DIR}/metadata"
+    export ROUTER_BASE_PATH=""
+    
+    log "Starting node process..."
+    log "TARGET_DIR: $TARGET_DIR"
+    log "CONFIG_PATH: $CONFIG_PATH"
+    
+    # Check if index.js exists
+    if [ ! -f "${TARGET_DIR}/index.js" ]; then
+        log "ERROR: ${TARGET_DIR}/index.js not found!"
+        ls -la "${TARGET_DIR}" >> "$INSTALL_LOG" 2>&1
+        return 1
+    fi
+    
+    # Start the application
+    cd "${TARGET_DIR}"
+    nohup "$NODE_PATH" index.js >> "$LOG_FILE" 2>&1 &
+    echo $! > "$PID_FILE"
+    
+    sleep 3
+    
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            log "Started successfully (PID: $PID)"
+            echo "Audiobookshelf started successfully (PID: $PID)"
+            return 0
+        fi
+    fi
+    
+    log "ERROR: Failed to start. Check logs: $LOG_FILE"
+    tail -20 "$LOG_FILE" >> "$INSTALL_LOG" 2>&1
+    echo "Failed to start Audiobookshelf. Check logs: $LOG_FILE"
+    return 1
+}
+
+stop_daemon() {
+    log "Stopping Audiobookshelf..."
+    
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            log "Sending SIGTERM to PID: $PID"
+            kill $PID
+            sleep 2
+            
+            # Force kill if still running
+            if kill -0 $PID 2>/dev/null; then
+                log "Force stopping with SIGKILL..."
+                kill -9 $PID
+                sleep 1
+            fi
+        fi
+        rm -f "$PID_FILE"
+    fi
+    
+    # Stop Sonos HTTP API
+    stop_sonos
+    
+    log "Audiobookshelf stopped."
+    return 0
+}
+
+daemon_status() {
+    log "Checking daemon status..."
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            log "Status: Running (PID: $PID)"
+            echo "Audiobookshelf is running (PID: $PID)"
+            return 0
+        fi
+    fi
+    
+    log "Status: Not running"
+    echo "Audiobookshelf is not running."
+    return 1
+}
+
+log "Case statement: $1"
+
+case "$1" in
+    start)
+        start_daemon
+        EXIT_CODE=$?
+        log "start_daemon exit code: $EXIT_CODE"
+        exit $EXIT_CODE
+        ;;
+    stop)
+        stop_daemon
+        EXIT_CODE=$?
+        log "stop_daemon exit code: $EXIT_CODE"
+        exit $EXIT_CODE
+        ;;
+    restart)
+        stop_daemon
+        sleep 2
+        start_daemon
+        EXIT_CODE=$?
+        log "restart exit code: $EXIT_CODE"
+        exit $EXIT_CODE
+        ;;
+    status)
+        daemon_status
+        EXIT_CODE=$?
+        log "daemon_status exit code: $EXIT_CODE"
+        exit $EXIT_CODE
+        ;;
+    log)
+        tail -f "$LOG_FILE"
+        ;;
+    *)
+        log "Unknown command: $1"
+        echo "Usage: $0 {start|stop|restart|status|log}"
+        exit 1
+        ;;
+esac
+
+exit 0

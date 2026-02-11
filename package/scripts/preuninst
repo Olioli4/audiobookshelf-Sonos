@@ -1,0 +1,41 @@
+#!/bin/sh
+# Pre-uninstallation script for Audiobookshelf
+
+LOG_FILE="/tmp/audiobookshelf_install.log"
+
+log() {
+    echo "$1"
+    echo "[preuninst] $(date): $1" >> "$LOG_FILE"
+}
+
+log "========================================"
+log "Pre-uninstallation starting..."
+log "Running as user: $(whoami)"
+log "SYNOPKG_PKGNAME: ${SYNOPKG_PKGNAME}"
+log "SYNOPKG_PKGDEST: ${SYNOPKG_PKGDEST}"
+
+# Stop the service if running
+PID_FILE="/var/packages/audiobookshelf/var/audiobookshelf.pid"
+log "Checking PID file: $PID_FILE"
+
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    log "Found PID file with PID: $PID"
+    if kill -0 $PID 2>/dev/null; then
+        log "Stopping Audiobookshelf service (PID: $PID)..."
+        kill $PID
+        sleep 2
+        if kill -0 $PID 2>/dev/null; then
+            log "Force killing PID: $PID"
+            kill -9 $PID
+        fi
+        log "Service stopped."
+    else
+        log "Process not running (stale PID file)"
+    fi
+else
+    log "No PID file found - service not running"
+fi
+
+log "Pre-uninstallation completed successfully."
+exit 0

@@ -1,0 +1,41 @@
+{
+  "step": [
+    {
+      "step_title": "Audiobookshelf Setup",
+      "items": [
+        {
+          "type": "multiselect",
+          "desc": "Welcome to Audiobookshelf! This package includes:",
+          "subitems": [
+            {
+              "key": "info_sqlite",
+              "desc": "SQLite database (no external database needed)",
+              "defaultValue": true,
+              "disabled": true
+            },
+            {
+              "key": "info_sonos",
+              "desc": "Sonos integration (bundled Sonos HTTP API)",
+              "defaultValue": true,
+              "disabled": true
+            }
+          ]
+        },
+        {
+          "type": "textfield",
+          "desc": "Web Port (default: 13378)",
+          "subitems": [
+            {
+              "key": "pkgwizard_port",
+              "desc": "Port",
+              "defaultValue": "13378",
+              "validator": {
+                "allowBlank": false
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

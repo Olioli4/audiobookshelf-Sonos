@@ -1,0 +1,56 @@
+#!/bin/sh
+# Pre-installation script for Audiobookshelf
+
+# Setup logging
+LOG_FILE="/tmp/audiobookshelf_install.log"
+echo "========================================" >> "$LOG_FILE"
+echo "PREINST - $(date)" >> "$LOG_FILE"
+echo "========================================" >> "$LOG_FILE"
+
+log() {
+    echo "$1"
+    echo "[preinst] $1" >> "$LOG_FILE"
+}
+
+log "Starting pre-installation checks..."
+log "Running as user: $(whoami)"
+log "Current directory: $(pwd)"
+
+# On Synology, node is not in PATH - check common locations
+NODE_PATH=""
+
+# Check common Synology Node.js paths
+if [ -f "/var/packages/Node.js_v18/target/bin/node" ]; then
+    NODE_PATH="/var/packages/Node.js_v18/target/bin/node"
+    log "Found Node.js v18 at $NODE_PATH"
+elif [ -f "/var/packages/Node.js_v20/target/bin/node" ]; then
+    NODE_PATH="/var/packages/Node.js_v20/target/bin/node"
+    log "Found Node.js v20 at $NODE_PATH"
+elif [ -f "/var/packages/Node.js_v16/target/bin/node" ]; then
+    NODE_PATH="/var/packages/Node.js_v16/target/bin/node"
+    log "Found Node.js v16 at $NODE_PATH"
+elif [ -f "/var/packages/Node.js_v14/target/bin/node" ]; then
+    NODE_PATH="/var/packages/Node.js_v14/target/bin/node"
+    log "Found Node.js v14 at $NODE_PATH"
+elif [ -f "/usr/local/bin/node" ]; then
+    NODE_PATH="/usr/local/bin/node"
+    log "Found Node.js at $NODE_PATH"
+elif command -v node > /dev/null 2>&1; then
+    NODE_PATH="node"
+    log "Found node in PATH"
+fi
+
+if [ -z "$NODE_PATH" ]; then
+    log "WARNING: Node.js is required but not found."
+    log "Available packages in /var/packages/:"
+    ls -la /var/packages/ >> "$LOG_FILE" 2>&1
+    log "Please install Node.js from Package Center first."
+    log "Continuing anyway..."
+else
+    NODE_VERSION=$("$NODE_PATH" -v 2>&1)
+    log "Node.js version: $NODE_VERSION"
+fi
+
+log "Pre-installation checks completed."
+log "Exit code: 0"
+exit 0

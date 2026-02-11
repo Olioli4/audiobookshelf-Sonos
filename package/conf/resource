@@ -1,0 +1,12 @@
+{
+    "data-share": {
+        "shares": [
+            {
+                "name": "audiobooks",
+                "permission": {
+                    "rw": ["audiobookshelf"]
+                }
+            }
+        ]
+    }
+}

@@ -1,0 +1,180 @@
+#!/bin/sh
+# Post-installation script for Audiobookshelf
+# Runs as package user, NOT root
+
+# Setup logging
+LOG_FILE="/tmp/audiobookshelf_install.log"
+echo "" >> "$LOG_FILE"
+echo "========================================" >> "$LOG_FILE"
+echo "POSTINST - $(date)" >> "$LOG_FILE"
+echo "========================================" >> "$LOG_FILE"
+
+log() {
+    echo "$1"
+    echo "[postinst] $1" >> "$LOG_FILE"
+}
+
+log "Starting post-installation..."
+log "Running as user: $(whoami)"
+log "SYNOPKG_PKGNAME: ${SYNOPKG_PKGNAME:-not set}"
+log "SYNOPKG_PKGDEST: ${SYNOPKG_PKGDEST:-not set}"
+log "SYNOPKG_PKGVER: ${SYNOPKG_PKGVER:-not set}"
+
+PACKAGE_DIR="/var/packages/audiobookshelf"
+TARGET_DIR="${PACKAGE_DIR}/target"
+DATA_DIR="/var/packages/audiobookshelf/var"
+CONFIG_DIR="${DATA_DIR}/config"
+METADATA_DIR="${DATA_DIR}/metadata"
+
+log "PACKAGE_DIR: $PACKAGE_DIR"
+log "TARGET_DIR: $TARGET_DIR"
+log "DATA_DIR: $DATA_DIR"
+
+# Check if directories exist
+log "Checking directories..."
+ls -la "$PACKAGE_DIR" >> "$LOG_FILE" 2>&1 || log "Cannot list $PACKAGE_DIR"
+ls -la "$TARGET_DIR" >> "$LOG_FILE" 2>&1 || log "Cannot list $TARGET_DIR"
+
+# Create directories
+log "Creating config directories..."
+mkdir -p "${CONFIG_DIR}" 2>&1 | tee -a "$LOG_FILE" || log "mkdir CONFIG_DIR failed"
+mkdir -p "${METADATA_DIR}" 2>&1 | tee -a "$LOG_FILE" || log "mkdir METADATA_DIR failed"
+mkdir -p "${DATA_DIR}/logs" 2>&1 | tee -a "$LOG_FILE" || log "mkdir logs failed"
+
+log "Directory creation completed"
+ls -la "$DATA_DIR" >> "$LOG_FILE" 2>&1
+
+# Read wizard port (set by DSM installer)
+WIZARD_PORT="${pkgwizard_port:-13378}"
+
+# Create .env file if it doesn't exist
+ENV_FILE="${CONFIG_DIR}/.env"
+if [ ! -f "${ENV_FILE}" ]; then
+    log "Creating .env file..."
+    # Generate random session secret
+    SESSION_SECRET=$(openssl rand -hex 32 2>/dev/null || date +%s%N | sha256sum | head -c 64)
+    
+    cat > "${ENV_FILE}" << EOF
+# Audiobookshelf DSM7-ARM Configuration
+# Generated on installation
+
+# Server Configuration
+PORT=${WIZARD_PORT}
+HOST=0.0.0.0
+
+# Paths
+CONFIG_PATH=${CONFIG_DIR}
+METADATA_PATH=${METADATA_DIR}
+
+# Database: SQLite (default, no configuration needed)
+# Database file stored in CONFIG_PATH
+
+# Session Configuration (auto-generated)
+SESSION_SECRET=${SESSION_SECRET}
+
+# Memory Optimization
+DISABLE_LIBRARY_CACHE=true
+LAZY_LOAD_MANAGERS=true
+
+# Sonos Integration (bundled - auto-configured)
+# Sonos HTTP API runs locally as part of this package
+SONOS_API_URL=http://localhost:5005
+
+# Logging
+LOG_LEVEL=info
+EOF
+
+    chmod 600 "${ENV_FILE}" 2>/dev/null || true
+    log ".env file created"
+else
+    log ".env file already exists"
+fi
+
+# Check for npm
+log "Checking for npm..."
+NPM_PATH=""
+if [ -f "/var/packages/Node.js_v18/target/bin/npm" ]; then
+    NPM_PATH="/var/packages/Node.js_v18/target/bin/npm"
+elif [ -f "/var/packages/Node.js_v20/target/bin/npm" ]; then
+    NPM_PATH="/var/packages/Node.js_v20/target/bin/npm"
+elif [ -f "/usr/local/bin/npm" ]; then
+    NPM_PATH="/usr/local/bin/npm"
+elif command -v npm > /dev/null 2>&1; then
+    NPM_PATH="npm"
+fi
+log "NPM_PATH: ${NPM_PATH:-not found}"
+
+# Install npm dependencies (skip native module compilation - we use prebuilt)
+cd "${TARGET_DIR}" 2>&1 || log "Cannot cd to TARGET_DIR"
+log "Current directory: $(pwd)"
+
+if [ -f "package.json" ] && [ -n "$NPM_PATH" ]; then
+    log "Installing Node.js dependencies for Audiobookshelf..."
+    # Use --ignore-scripts to skip native module compilation
+    "$NPM_PATH" install --production --no-optional --ignore-scripts >> "$LOG_FILE" 2>&1
+    NPM_EXIT=$?
+    log "npm install exit code: $NPM_EXIT"
+    
+    # Inject prebuilt sqlite3 binary
+    if [ -d "${TARGET_DIR}/prebuilt" ]; then
+        log "Injecting prebuilt sqlite3 binary..."
+        
+        # Create build/Release directory - this is where bindings.js looks first
+        SQLITE3_DIR="${TARGET_DIR}/node_modules/sqlite3"
+        RELEASE_DIR="${SQLITE3_DIR}/build/Release"
+        
+        mkdir -p "${RELEASE_DIR}"
+        log "Created directory: ${RELEASE_DIR}"
+        
+        # Copy prebuilt binary to build/Release (standard location)
+        if [ -f "${TARGET_DIR}/prebuilt/node_sqlite3.node" ]; then
+            cp "${TARGET_DIR}/prebuilt/node_sqlite3.node" "${RELEASE_DIR}/"
+            chmod 755 "${RELEASE_DIR}/node_sqlite3.node"
+            log "Prebuilt sqlite3 binary installed to ${RELEASE_DIR}/"
+            log "Binary file info:"
+            ls -la "${RELEASE_DIR}/node_sqlite3.node" >> "$LOG_FILE" 2>&1
+            file "${RELEASE_DIR}/node_sqlite3.node" >> "$LOG_FILE" 2>&1 || true
+        else
+            log "ERROR: Prebuilt binary not found!"
+            log "Contents of prebuilt dir:"
+            ls -la "${TARGET_DIR}/prebuilt" >> "$LOG_FILE" 2>&1
+        fi
+    else
+        log "WARNING: No prebuilt directory found - sqlite3 may not work!"
+    fi
+else
+    log "Skipping npm install (package.json or npm not found)"
+fi
+
+# Install sonos-http-api dependencies
+SONOS_DIR="${TARGET_DIR}/sonos-http-api"
+if [ -d "$SONOS_DIR" ] && [ -f "${SONOS_DIR}/package.json" ] && [ -n "$NPM_PATH" ]; then
+    log "Installing Node.js dependencies for Sonos HTTP API..."
+    cd "$SONOS_DIR"
+    "$NPM_PATH" install --production --no-optional >> "$LOG_FILE" 2>&1
+    NPM_EXIT=$?
+    log "sonos npm install exit code: $NPM_EXIT"
+    
+    # Create cache directory for Sonos
+    mkdir -p "${SONOS_DIR}/cache" 2>/dev/null
+    mkdir -p "${SONOS_DIR}/static/tts" 2>/dev/null
+else
+    log "Sonos HTTP API not found or npm not available, skipping..."
+fi
+
+log "Post-installation completed successfully"
+log "Log file: $LOG_FILE"
+
+echo ""
+echo "========================================"
+echo "  Audiobookshelf Installation Complete"
+echo "========================================"
+echo ""
+echo "Configuration: ${ENV_FILE}"
+echo "Log file: $LOG_FILE"
+echo ""
+echo "Access at: http://your-nas-ip:${WIZARD_PORT}"
+echo ""
+echo "========================================"
+
+exit 0

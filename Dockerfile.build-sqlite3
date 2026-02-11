@@ -1,0 +1,86 @@
+# Dockerfile for building sqlite3 native module for ARM Synology NAS
+# Target: armv7 (32-bit) with glibc 2.24 for DSM 7 compatibility
+#
+# Usage:
+#   docker buildx build --platform linux/arm/v7 -f Dockerfile.build-sqlite3 -t audiobookshelf-sqlite3-builder .
+#   docker run --rm -v $(pwd)/prebuilt:/output audiobookshelf-sqlite3-builder
+
+# Use Debian Stretch (glibc 2.24) for compatibility with older DSM 7 (glibc 2.26)
+# Binaries built against glibc 2.24 will work on systems with glibc 2.24+
+FROM arm32v7/debian:stretch
+
+# Use archived Debian Stretch repositories (EOL)
+RUN echo "deb http://archive.debian.org/debian stretch main" > /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian-security stretch/updates main" >> /etc/apt/sources.list
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    make \
+    g++ \
+    ca-certificates \
+    gnupg \
+    libffi-dev \
+    libssl-dev \
+    zlib1g-dev \
+    file \
+    binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python 3.8 from source (Stretch only has 3.5, node-gyp needs >=3.6)
+RUN cd /tmp && \
+    curl -LO https://www.python.org/ftp/python/3.8.18/Python-3.8.18.tgz && \
+    tar xzf Python-3.8.18.tgz && \
+    cd Python-3.8.18 && \
+    ./configure --enable-optimizations --prefix=/usr/local && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/Python-3.8.18*
+
+# Set Python path for node-gyp
+ENV PYTHON=/usr/local/bin/python3
+
+# Install Node.js 16 via n (Node 18+ requires glibc 2.28, Stretch has 2.24)
+# N-API bindings are ABI-stable, so Node 16-built binary works on Node 18
+RUN curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n -o /usr/local/bin/n && \
+    chmod +x /usr/local/bin/n && \
+    n 16.20.2
+
+# Verify node and npm
+RUN node --version && npm --version
+
+# Verify glibc version (should be 2.24)
+RUN echo "=== GLIBC VERSION ===" && \
+    ldd --version | head -1 && \
+    echo "=== GCC VERSION ===" && \
+    gcc --version | head -1
+
+WORKDIR /build
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Configure npm to use python3.8
+RUN npm config set python /usr/local/bin/python3
+
+# Install only sqlite3 (skip other deps for faster build)
+RUN npm install sqlite3 --build-from-source --python=/usr/local/bin/python3
+
+# Find and show the built binary
+RUN find /build/node_modules -name "*.node" -type f
+
+# Create output script - copy from build/Release (standard location)
+RUN echo '#!/bin/sh' > /copy-binary.sh && \
+    echo 'BINARY="/build/node_modules/sqlite3/build/Release/node_sqlite3.node"' >> /copy-binary.sh && \
+    echo 'if [ -f "$BINARY" ]; then' >> /copy-binary.sh && \
+    echo '  cp -v "$BINARY" /output/' >> /copy-binary.sh && \
+    echo '  echo "Binary copied successfully"' >> /copy-binary.sh && \
+    echo 'else' >> /copy-binary.sh && \
+    echo '  echo "ERROR: Binary not found at $BINARY"' >> /copy-binary.sh && \
+    echo '  find /build -name "*.node" -type f' >> /copy-binary.sh && \
+    echo '  exit 1' >> /copy-binary.sh && \
+    echo 'fi' >> /copy-binary.sh && \
+    chmod +x /copy-binary.sh
+
+CMD ["/copy-binary.sh"]
+
