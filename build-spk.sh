@@ -43,7 +43,8 @@ cp "${SCRIPT_DIR}/package.json" "${PACKAGE_TGZ_DIR}/"
 # Copy server folder (synced with upstream master, using SQLite)
 echo "    Copying server folder..."
 cp -r "${SCRIPT_DIR}/server" "${PACKAGE_TGZ_DIR}/"
-cp "${SCRIPT_DIR}/.env.example" "${PACKAGE_TGZ_DIR}/"
+# Optional: copy .env.example if it exists
+[ -f "${SCRIPT_DIR}/.env.example" ] && cp "${SCRIPT_DIR}/.env.example" "${PACKAGE_TGZ_DIR}/"
 
 # NOTE: Do NOT run npm install here - native modules (sqlite3) must be compiled on ARM
 # The postinst script runs npm install on the NAS
