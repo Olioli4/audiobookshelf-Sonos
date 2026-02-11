@@ -67,9 +67,25 @@ if (Test-Path "$SourceDir\sonos-http-api") {
     Write-Host "    WARNING: sonos-http-api not found"
 }
 
-Write-Host "[7/7] Copying images (icons)..."
+Write-Host "[7/8] Copying images (icons)..."
 if (Test-Path "$SourceDir\images") {
     Copy-Item -Recurse "$SourceDir\images" "$Destination\"
+}
+
+Write-Host "[8/8] Converting shell scripts to Unix line endings (LF)..."
+# Convert .sh files
+Get-ChildItem -Path "$Destination" -Recurse -Include "*.sh" | ForEach-Object {
+    $content = Get-Content $_.FullName -Raw
+    $content = $content -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText($_.FullName, $content)
+}
+# Convert package scripts (no extension)
+if (Test-Path "$Destination\package\scripts") {
+    Get-ChildItem -Path "$Destination\package\scripts" | ForEach-Object {
+        $content = Get-Content $_.FullName -Raw
+        $content = $content -replace "`r`n", "`n"
+        [System.IO.File]::WriteAllText($_.FullName, $content)
+    }
 }
 
 # Create dist folder

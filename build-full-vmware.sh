@@ -110,8 +110,11 @@ build_client() {
         npm install
     fi
 
+    # Set base path to root (empty = no prefix)
+    export ROUTER_BASE_PATH=""
+    
     # Run nuxt generate
-    echo "    Running nuxt generate..."
+    echo "    Running nuxt generate (ROUTER_BASE_PATH='')..."
     npm run generate
 
     # Verify dist was created
