@@ -24,6 +24,7 @@ const SocketAuthority = require('./SocketAuthority')
 const ApiRouter = require('./routers/ApiRouter')
 const HlsRouter = require('./routers/HlsRouter')
 const PublicRouter = require('./routers/PublicRouter')
+const SonosRouter = require('./routers/SonosRouter')
 
 const LogManager = require('./managers/LogManager')
 const EmailManager = require('./managers/EmailManager')
@@ -38,6 +39,7 @@ const CronManager = require('./managers/CronManager')
 const ApiCacheManager = require('./managers/ApiCacheManager')
 const BinaryManager = require('./managers/BinaryManager')
 const ShareManager = require('./managers/ShareManager')
+const { SonosIntegration } = require('./integrations')
 const LibraryScanner = require('./scanner/LibraryScanner')
 
 //Import the main Passport and Express-Session library
@@ -108,11 +110,13 @@ class Server {
     this.cronManager = new CronManager(this.podcastManager, this.playbackSessionManager)
     this.apiCacheManager = new ApiCacheManager()
     this.binaryManager = new BinaryManager()
+    this.sonosIntegration = new SonosIntegration()
 
     // Routers
     this.apiRouter = new ApiRouter(this)
     this.hlsRouter = new HlsRouter(this.auth, this.playbackSessionManager)
     this.publicRouter = new PublicRouter(this.playbackSessionManager)
+    this.sonosRouter = new SonosRouter(this.sonosIntegration, this.playbackSessionManager)
 
     Logger.logManager = new LogManager()
 
@@ -172,6 +176,15 @@ class Server {
     const libraries = await Database.libraryModel.getAllWithFolders()
     await this.cronManager.init(libraries)
     this.apiCacheManager.init()
+
+    // Initialize Sonos integration with settings from database
+    if (Database.serverSettings.sonosEnabled) {
+      this.sonosIntegration.init({
+        sonosApiUrl: Database.serverSettings.sonosApiUrl,
+        serverUrl: Database.serverSettings.sonosServerUrl
+      })
+      Logger.info('[Server] Sonos integration initialized')
+    }
 
     if (Database.serverSettings.scannerDisableWatcher) {
       Logger.info(`[Server] Watcher is disabled`)
@@ -315,6 +328,7 @@ class Server {
     // Skip JSON parsing for internal-api routes
     router.use(/^(?!\/internal-api).*/, express.json({ limit: '10mb' }))
 
+    router.use('/api/sonos', this.auth.ifAuthNeeded(this.authMiddleware.bind(this)), this.sonosRouter.router)
     router.use('/api', this.auth.ifAuthNeeded(this.authMiddleware.bind(this)), this.apiRouter.router)
     router.use('/hls', this.hlsRouter.router)
     router.use('/public', this.publicRouter.router)

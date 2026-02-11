@@ -55,6 +55,13 @@ class ServerSettings {
     this.language = 'en-us'
     this.allowedOrigins = []
 
+    // Sonos Integration
+    this.sonosEnabled = false
+    this.sonosApiUrl = null
+    this.sonosServerUrl = null
+    this.sonosDefaultRoom = null
+    this.sonosDefaultGroup = []
+
     this.logLevel = Logger.logLevel
 
     this.version = packageJson.version
@@ -122,6 +129,14 @@ class ServerSettings {
     this.timeFormat = settings.timeFormat || 'HH:mm'
     this.language = settings.language || 'en-us'
     this.allowedOrigins = settings.allowedOrigins || []
+
+    // Sonos Integration
+    this.sonosEnabled = !!settings.sonosEnabled
+    this.sonosApiUrl = settings.sonosApiUrl || null
+    this.sonosServerUrl = settings.sonosServerUrl || null
+    this.sonosDefaultRoom = settings.sonosDefaultRoom || null
+    this.sonosDefaultGroup = settings.sonosDefaultGroup || []
+
     this.logLevel = settings.logLevel || Logger.logLevel
     this.version = settings.version || null
     this.buildNumber = settings.buildNumber || 0 // Added v2.4.5
@@ -230,6 +245,11 @@ class ServerSettings {
       sortingIgnorePrefix: this.sortingIgnorePrefix,
       sortingPrefixes: [...this.sortingPrefixes],
       chromecastEnabled: this.chromecastEnabled,
+      sonosEnabled: this.sonosEnabled,
+      sonosApiUrl: this.sonosApiUrl,
+      sonosServerUrl: this.sonosServerUrl,
+      sonosDefaultRoom: this.sonosDefaultRoom,
+      sonosDefaultGroup: [...this.sonosDefaultGroup],
       dateFormat: this.dateFormat,
       timeFormat: this.timeFormat,
       language: this.language,
