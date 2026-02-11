@@ -234,6 +234,25 @@ class SonosIntegration extends BaseStreamTarget {
   }
 
   /**
+   * Stop playback
+   * @param {string} deviceId - Room name
+   * @returns {Promise<boolean>}
+   */
+  async stop(deviceId) {
+    const result = await this._request(`/${this._encodeRoom(deviceId)}/stop`)
+    return result !== null
+  }
+
+  /**
+   * Resume playback (alias for play)
+   * @param {string} deviceId - Room name
+   * @returns {Promise<boolean>}
+   */
+  async resume(deviceId) {
+    return this.play(deviceId)
+  }
+
+  /**
    * Set volume (0-100)
    * @param {string} deviceId - Room name
    * @param {number} volume 
