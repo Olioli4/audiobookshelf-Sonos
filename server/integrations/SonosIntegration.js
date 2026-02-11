@@ -7,7 +7,7 @@ const BaseStreamTarget = require('./BaseStreamTarget')
 /**
  * Sonos integration for streaming audio to Sonos speakers
  * Uses node-sonos-http-api as a bridge
- * 
+ *
  * @see https://github.com/jishi/node-sonos-http-api
  * @extends BaseStreamTarget
  */
@@ -75,7 +75,7 @@ class SonosIntegration extends BaseStreamTarget {
 
   /**
    * Normalize URL - add protocol if missing, remove trailing slash
-   * @param {string} url 
+   * @param {string} url
    * @returns {string}
    * @private
    */
@@ -90,7 +90,7 @@ class SonosIntegration extends BaseStreamTarget {
 
   /**
    * Initialize with settings
-   * @param {Object} settings 
+   * @param {Object} settings
    * @param {string} [settings.sonosApiUrl] - URL of node-sonos-http-api
    * @param {string} [settings.serverUrl] - URL of audiobookshelf server accessible from network
    */
@@ -115,7 +115,7 @@ class SonosIntegration extends BaseStreamTarget {
   async _request(endpoint) {
     Logger.debug(`[SonosIntegration] _request called for endpoint: ${endpoint}`)
     Logger.debug(`[SonosIntegration] enabled check: ${this.enabled}, apiUrl: ${this.apiUrl}`)
-    
+
     if (!this.enabled) {
       Logger.warn('[SonosIntegration] Sonos not configured - enabled is false')
       Logger.debug(`[SonosIntegration] _enabled: ${this._enabled}, _apiUrl: ${this._apiUrl}`)
@@ -128,10 +128,10 @@ class SonosIntegration extends BaseStreamTarget {
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), this.requestTimeout)
-      
+
       const response = await fetch(url, { signal: controller.signal })
       clearTimeout(timeout)
-      
+
       if (!response.ok) {
         const errorText = await response.text().catch(() => '')
         Logger.error(`[SonosIntegration] Request failed: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`)
@@ -152,7 +152,7 @@ class SonosIntegration extends BaseStreamTarget {
 
   /**
    * URL-encode a room name for API requests
-   * @param {string} roomName 
+   * @param {string} roomName
    * @returns {string}
    * @private
    */
@@ -183,12 +183,12 @@ class SonosIntegration extends BaseStreamTarget {
           state: zone.coordinator.state?.playbackState || 'STOPPED',
           volume: zone.coordinator.state?.volume || 0,
           isCoordinator: true,
-          members: zone.members?.map(m => m.roomName) || []
+          members: zone.members?.map((m) => m.roomName) || []
         })
       }
     }
-    
-    Logger.debug(`[SonosIntegration] Found ${rooms.length} rooms: ${rooms.map(r => r.name).join(', ')}`)
+
+    Logger.debug(`[SonosIntegration] Found ${rooms.length} rooms: ${rooms.map((r) => r.name).join(', ')}`)
     return rooms
   }
 
@@ -240,20 +240,22 @@ class SonosIntegration extends BaseStreamTarget {
   }
 
   /**
-   * Set volume (0-100)
-   * @param {string} deviceId - Room name
-   * @param {number} volume 
+   * Set volume (0-100) for the group
+   * Uses groupVolume to set volume on all grouped speakers
+   * @param {string} deviceId - Room name (coordinator)
+   * @param {number} volume
    * @returns {Promise<boolean>}
    */
   async setVolume(deviceId, volume) {
-    const result = await this._request(`/${this._encodeRoom(deviceId)}/volume/${Math.round(volume)}`)
+    // Use groupVolume to set volume on all grouped speakers
+    const result = await this._request(`/${this._encodeRoom(deviceId)}/groupVolume/${Math.round(volume)}`)
     return result !== null
   }
 
   /**
    * Seek to position
    * @param {string} deviceId - Room name
-   * @param {number} positionSeconds 
+   * @param {number} positionSeconds
    * @returns {Promise<boolean>}
    */
   async seek(deviceId, positionSeconds) {
@@ -340,7 +342,7 @@ class SonosIntegration extends BaseStreamTarget {
     }
 
     Logger.info(`[SonosIntegration] Creating group: ${coordinatorId} + ${memberIds.join(', ')}`)
-    
+
     for (const room of memberIds) {
       if (room !== coordinatorId) {
         const success = await this.addToGroup(coordinatorId, room)
@@ -349,10 +351,10 @@ class SonosIntegration extends BaseStreamTarget {
           return false
         }
         // Small delay between commands
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await new Promise((resolve) => setTimeout(resolve, 200))
       }
     }
-    
+
     return true
   }
 
@@ -363,21 +365,21 @@ class SonosIntegration extends BaseStreamTarget {
    */
   async disbandGroup(coordinatorId) {
     const devices = await this.getDevices()
-    const zone = devices.find(z => z.name === coordinatorId)
-    
+    const zone = devices.find((z) => z.name === coordinatorId)
+
     if (!zone || !zone.members || zone.members.length <= 1) {
       return true
     }
 
     Logger.info(`[SonosIntegration] Disbanding group: ${zone.members.join(', ')}`)
-    
+
     for (const member of zone.members) {
       if (member !== coordinatorId) {
         await this.leaveGroup(member)
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await new Promise((resolve) => setTimeout(resolve, 200))
       }
     }
-    
+
     return true
   }
 }

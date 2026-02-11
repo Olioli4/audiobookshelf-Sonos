@@ -1,5 +1,22 @@
 <template>
-  <div>
+  <div class="flex items-center">
+    <!-- Sonos Volume Slider (visible when in Sonos mode) -->
+    <div v-if="isSonosMode" class="flex items-center mr-2 pointer-events-auto">
+      <span class="material-symbols text-lg text-gray-400 mr-1">volume_down</span>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        :value="sonosVolume"
+        class="sonos-volume-slider w-16 lg:w-24"
+        @input="onVolumeInput"
+        @change="onVolumeChange"
+        @mousedown.stop
+        @click.stop
+      />
+      <span class="text-xs text-gray-400 ml-1 w-8">{{ sonosVolume }}%</span>
+    </div>
+
     <!-- Sonos Output Toggle Button -->
     <ui-tooltip direction="top" :text="sonosEnabled ? 'Switch to Sonos' : 'Sonos not configured'">
       <button :disabled="!sonosEnabled" :aria-label="isSonosMode ? 'Switch to Browser' : 'Switch to Sonos'" class="mx-1 lg:mx-2" :class="sonosEnabled ? 'text-gray-300 hover:text-white cursor-pointer' : 'text-gray-600 cursor-not-allowed'" @mousedown.prevent @mouseup.prevent @click.stop="toggleSonosMode">
@@ -38,7 +55,7 @@
                 </p>
                 <p class="text-xs text-gray-400">
                   {{ room.state === 'PLAYING' ? 'Playing' : 'Idle' }}
-                  <span v-if="room.isGrouped && room.groupMembers"> • Grouped with: {{ room.groupMembers.filter(m => m !== room.name).join(', ') }}</span>
+                  <span v-if="room.isGrouped && room.groupMembers"> • Grouped with: {{ room.groupMembers.filter((m) => m !== room.name).join(', ') }}</span>
                   <span v-else-if="room.members && room.members.length > 1"> • Group: {{ room.members.join(', ') }}</span>
                 </p>
               </div>
@@ -79,20 +96,75 @@ export default {
       sonosRooms: [],
       selectedRoom: null,
       sonosStatus: null,
-      sonosIsPlaying: false
+      sonosIsPlaying: false,
+      sonosVolume: 30,
+      volumeChangeTimeout: null,
+      volumeBlockPolling: false,
+      pollInterval: null
     }
   },
   computed: {
     sonosEnabled() {
       // Check if Sonos is configured on the server
       return this.sonosStatus?.enabled === true
+    },
+    defaultRoom() {
+      return this.sonosStatus?.defaultRoom || null
+    },
+    defaultGroup() {
+      return this.sonosStatus?.defaultGroup || []
     }
   },
   async mounted() {
     // Check Sonos status on mount
     await this.checkSonosStatus()
   },
+  beforeDestroy() {
+    this.stopPolling()
+  },
   methods: {
+    startPolling() {
+      if (this.pollInterval) return
+      // Poll every 2 seconds for Sonos state
+      this.pollInterval = setInterval(() => this.pollSonosState(), 2000)
+    },
+    stopPolling() {
+      if (this.pollInterval) {
+        clearInterval(this.pollInterval)
+        this.pollInterval = null
+      }
+    },
+    async pollSonosState() {
+      if (!this.isSonosMode || !this.selectedRoom) return
+      try {
+        const state = await this.$axios.$get(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/state`)
+        const isPlaying = state?.playbackState === 'PLAYING'
+        console.log('[SonosControl] pollSonosState:', state?.playbackState, 'elapsedTime:', state?.elapsedTime, 'isPlaying:', isPlaying, 'was:', this.sonosIsPlaying)
+
+        // Always emit time update for position sync
+        if (typeof state?.elapsedTime === 'number') {
+          this.$emit('sonos-time-update', { currentTime: state.elapsedTime, duration: state?.currentTrack?.duration || 0 })
+        }
+
+        // Update volume if changed externally (e.g., from Sonos app)
+        if (typeof state?.volume === 'number') {
+          if (this.volumeBlockPolling) {
+            console.log('[SonosControl] poll: volume update blocked, state.volume:', state.volume, 'current:', this.sonosVolume)
+          } else if (state.volume !== this.sonosVolume) {
+            console.log('[SonosControl] poll: updating volume from', this.sonosVolume, 'to', state.volume)
+            this.sonosVolume = state.volume
+          }
+        }
+
+        if (isPlaying !== this.sonosIsPlaying) {
+          console.log('[SonosControl] State changed, emitting sonos-state-changed:', isPlaying)
+          this.sonosIsPlaying = isPlaying
+          this.$emit('sonos-state-changed', { isPlaying })
+        }
+      } catch (error) {
+        console.error('[SonosControl] Polling error:', error.message)
+      }
+    },
     async checkSonosStatus() {
       try {
         this.sonosStatus = await this.$axios.$get('/api/sonos/status')
@@ -105,6 +177,15 @@ export default {
       if (!this.sonosEnabled) return
 
       if (this.isSonosMode) {
+        // Get current Sonos position before stopping
+        let currentPosition = 0
+        try {
+          const state = await this.$axios.$get(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/state`)
+          currentPosition = state?.elapsedTime || 0
+        } catch (e) {
+          console.warn('Failed to get Sonos position:', e)
+        }
+        
         // Stop Sonos playback before switching back to browser
         if (this.selectedRoom && this.sonosIsPlaying) {
           await this.sonosPause()
@@ -113,16 +194,20 @@ export default {
         this.isSonosMode = false
         this.sonosIsPlaying = false
         this.selectedRoom = null
-        this.$emit('output-changed', { type: 'browser' })
+        this.stopPolling()
+        this.$emit('output-changed', { type: 'browser', currentTime: currentPosition })
         this.$toast.info('Switched to browser playback')
       } else {
-        // Check for saved room - auto-play without modal
-        const savedRoom = localStorage.getItem('sonosSelectedRoom')
+        // Use server default room first, then localStorage, then room selector
         await this.loadSonosRooms()
-        
-        if (savedRoom && this.sonosRooms.find((r) => r.name === savedRoom)) {
-          // Auto-play on saved room
-          this.selectedRoom = savedRoom
+
+        const serverDefault = this.defaultRoom
+        const savedRoom = localStorage.getItem('sonosSelectedRoom')
+        const preferredRoom = serverDefault || savedRoom
+
+        if (preferredRoom && this.sonosRooms.find((r) => r.name === preferredRoom)) {
+          // Auto-play on preferred room (server default or saved)
+          this.selectedRoom = preferredRoom
           await this.confirmRoomSelection()
         } else if (this.sonosRooms.length === 1) {
           // Auto-play on only room
@@ -142,9 +227,11 @@ export default {
         this.sonosRooms = response.rooms || response.zones || []
 
         // Restore previously selected room if still available
+        const serverDefault = this.defaultRoom
         const savedRoom = localStorage.getItem('sonosSelectedRoom')
-        if (savedRoom && this.sonosRooms.find((r) => r.name === savedRoom)) {
-          this.selectedRoom = savedRoom
+        const preferredRoom = serverDefault || savedRoom
+        if (preferredRoom && this.sonosRooms.find((r) => r.name === preferredRoom)) {
+          this.selectedRoom = preferredRoom
         } else if (this.sonosRooms.length === 1) {
           this.selectedRoom = this.sonosRooms[0].name
         }
@@ -162,11 +249,16 @@ export default {
     async confirmRoomSelection() {
       if (!this.selectedRoom) return
 
-      // Save selection for next time
+      // Save selection for next time (fallback when no server default)
       localStorage.setItem('sonosSelectedRoom', this.selectedRoom)
 
       this.showRoomSelector = false
       this.isSonosMode = true
+
+      // Apply grouping from server config if available
+      if (this.defaultGroup && this.defaultGroup.length > 0) {
+        await this.applyGrouping()
+      }
 
       this.$emit('output-changed', {
         type: 'sonos',
@@ -178,7 +270,30 @@ export default {
         await this.playOnSonos()
       }
 
-      this.$toast.success(`Now playing on ${this.selectedRoom}`)
+      // Get initial volume from Sonos (with small delay to let playback start)
+      setTimeout(async () => {
+        await this.fetchSonosVolume()
+        console.log('[SonosControl] Initial volume fetched:', this.sonosVolume)
+      }, 500)
+      
+      // Start polling for Sonos state changes
+      this.startPolling()
+
+      const groupedRooms = this.defaultGroup?.length ? ` + ${this.defaultGroup.join(', ')}` : ''
+      this.$toast.success(`Now playing on ${this.selectedRoom}${groupedRooms}`)
+    },
+    async applyGrouping() {
+      if (!this.selectedRoom || !this.defaultGroup?.length) return
+
+      try {
+        // Group the default rooms with the selected room
+        await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/group`, {
+          rooms: this.defaultGroup
+        })
+      } catch (error) {
+        console.error('Failed to apply Sonos grouping:', error)
+        // Continue playback even if grouping fails
+      }
     },
     async playOnSonos() {
       if (!this.selectedRoom || !this.libraryItemId) return
@@ -192,8 +307,14 @@ export default {
         if (this.episodeId) {
           payload.episodeId = this.episodeId
         }
-        await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/play-item`, payload)
+        const response = await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/play-item`, payload)
         this.sonosIsPlaying = true
+        
+        // Emit session info so PlayerHandler can track it
+        if (response?.sessionId) {
+          this.$emit('sonos-session-started', { sessionId: response.sessionId })
+        }
+        
         this.$emit('sonos-state-changed', { isPlaying: true })
       } catch (error) {
         console.error('Failed to play on Sonos:', error)
@@ -230,16 +351,6 @@ export default {
         console.error('Failed to seek Sonos:', error)
       }
     },
-    async sonosSetVolume(volume) {
-      if (!this.selectedRoom) return
-      try {
-        await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/volume`, {
-          volume: Math.round(volume * 100)
-        })
-      } catch (error) {
-        console.error('Failed to set Sonos volume:', error)
-      }
-    },
     async sonosJumpForward() {
       if (!this.selectedRoom) return
       try {
@@ -265,7 +376,104 @@ export default {
       } catch (error) {
         console.error('Failed to jump backward on Sonos:', error)
       }
+    },
+    onVolumeInput(event) {
+      // Update UI immediately for responsiveness
+      const vol = parseInt(event.target.value)
+      console.log('[SonosControl] onVolumeInput:', vol)
+      this.sonosVolume = vol
+      // Block polling from overwriting during drag
+      this.volumeBlockPolling = true
+    },
+    onVolumeChange(event) {
+      // Called when user releases the slider
+      const volume = parseInt(event.target.value)
+      console.log('[SonosControl] onVolumeChange:', volume)
+      this.sonosVolume = volume
+      
+      // Cancel any pending API call
+      if (this.volumeChangeTimeout) {
+        clearTimeout(this.volumeChangeTimeout)
+      }
+      
+      // Send volume to Sonos after brief delay
+      this.volumeChangeTimeout = setTimeout(() => {
+        this.setSonosVolume(volume)
+      }, 100)
+    },
+    async setSonosVolume(volume) {
+      if (!this.selectedRoom) {
+        console.log('[SonosControl] setSonosVolume: no room selected')
+        return
+      }
+      console.log('[SonosControl] setSonosVolume:', volume, 'room:', this.selectedRoom)
+      
+      // Block polling immediately
+      this.volumeBlockPolling = true
+      this.sonosVolume = volume
+      
+      try {
+        await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/volume`, { volume })
+        console.log('[SonosControl] Volume set successfully to', volume)
+      } catch (error) {
+        console.error('Failed to set Sonos volume:', error)
+        this.$toast.error('Failed to set volume')
+      }
+      
+      // Keep blocking polling for 2 seconds after setting volume
+      setTimeout(() => {
+        this.volumeBlockPolling = false
+        console.log('[SonosControl] Volume polling unblocked')
+      }, 2000)
+    },
+    async fetchSonosVolume() {
+      if (!this.selectedRoom) return
+      // Don't overwrite if user is adjusting volume
+      if (this.volumeBlockPolling) {
+        console.log('[SonosControl] fetchSonosVolume skipped - blocked')
+        return
+      }
+      try {
+        const state = await this.$axios.$get(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/state`)
+        console.log('[SonosControl] fetchSonosVolume got state.volume:', state?.volume)
+        if (typeof state?.volume === 'number' && state.volume !== this.sonosVolume) {
+          console.log('[SonosControl] Setting sonosVolume from', this.sonosVolume, 'to', state.volume)
+          this.sonosVolume = state.volume
+        }
+      } catch (error) {
+        console.error('Failed to get Sonos volume:', error)
+      }
     }
   }
 }
 </script>
+
+<style scoped>
+.sonos-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #4b5563;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.sonos-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #22c55e;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.sonos-volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #22c55e;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+</style>

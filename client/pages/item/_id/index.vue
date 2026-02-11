@@ -537,6 +537,11 @@ export default {
         // Uses the sorting and filtering from the episode table component
         const episodesInListeningOrder = this.$refs.episodesTable?.episodesList || []
 
+        if (!episodesInListeningOrder.length) {
+          this.$toast.error('No episodes available')
+          return
+        }
+
         // Find the first unplayed episode from the table
         let episodeIndex = episodesInListeningOrder.findIndex((ep) => {
           const podcastProgress = this.$store.getters['user/getUserMediaProgress'](this.libraryItemId, ep.id)

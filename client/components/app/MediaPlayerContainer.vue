@@ -57,6 +57,8 @@
       @showPlayerQueueItems="showPlayerQueueItemsModal = true"
       @outputChanged="onOutputChanged"
       @sonosStateChanged="onSonosStateChanged"
+      @sonosTimeUpdate="onSonosTimeUpdate"
+      @sonosSessionStarted="onSonosSessionStarted"
     />
 
     <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="bookmarkCurrentTime" :playback-rate="currentPlaybackRate" :library-item-id="libraryItemId" @select="selectBookmark" />
@@ -208,22 +210,65 @@ export default {
       this.outputMode = data.type
       if (data.type === 'sonos') {
         this.sonosRoom = data.room
-        // Mute browser audio when playing on Sonos
+        // Close the browser session and stop player before Sonos creates a new one
+        if (this.playerHandler?.currentSessionId) {
+          console.log('[MediaPlayerContainer] Closing browser session before Sonos:', this.playerHandler.currentSessionId)
+          this.playerHandler.sendCloseSession()
+        }
+        // Stop the browser player's sync interval
+        if (this.playerHandler) {
+          this.playerHandler.stopPlayInterval()
+          this.playerHandler.currentSessionId = null
+        }
+        // Pause browser audio when playing on Sonos
         if (this.playerHandler?.player) {
-          this.playerHandler.player.setVolume(0)
+          this.playerHandler.player.pause()
         }
       } else {
+        // Switching back from Sonos to browser
+        const sonosPosition = data.currentTime || this.currentTime // Use event position or fallback to synced time
+        console.log('[MediaPlayerContainer] Switching to browser, seeking to Sonos position:', sonosPosition)
+        
+        // Close the Sonos session to save progress
+        if (this.playerHandler?.currentSessionId) {
+          console.log('[MediaPlayerContainer] Closing Sonos session:', this.playerHandler.currentSessionId)
+          this.playerHandler.sendCloseSession()
+          this.playerHandler.currentSessionId = null
+        }
+        
         this.sonosRoom = null
-        // Restore browser volume
+        // Restore browser volume and create new session
         const savedVolume = localStorage.getItem('audiobookshelf-volume') || 1
-        if (this.playerHandler?.player) {
-          this.playerHandler.player.setVolume(parseFloat(savedVolume))
+        if (this.playerHandler) {
+          // Store position to seek to after new session starts
+          this.playerHandler.startTimeOverride = sonosPosition
+          this.playerHandler.playWhenReady = true
+          // Create new browser session and play
+          this.playerHandler.prepare()
+          if (this.playerHandler.player) {
+            this.playerHandler.player.setVolume(parseFloat(savedVolume))
+          }
         }
       }
     },
     onSonosStateChanged(data) {
       // Update isPlaying state when Sonos play/pause happens
+      console.log('[MediaPlayerContainer] onSonosStateChanged:', data)
       this.setPlaying(data.isPlaying)
+    },
+    onSonosTimeUpdate(data) {
+      // Update time position from Sonos state
+      console.log('[MediaPlayerContainer] onSonosTimeUpdate:', data)
+      if (typeof data.currentTime === 'number') {
+        this.setCurrentTime(data.currentTime)
+      }
+    },
+    onSonosSessionStarted(data) {
+      // Track the Sonos session ID so progress syncs work
+      console.log('[MediaPlayerContainer] onSonosSessionStarted:', data)
+      if (data.sessionId && this.playerHandler) {
+        this.playerHandler.currentSessionId = data.sessionId
+      }
     },
     mediaFinished(libraryItemId, episodeId) {
       // Play next item in queue

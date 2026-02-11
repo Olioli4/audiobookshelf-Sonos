@@ -43,7 +43,7 @@
         </ui-tooltip>
 
         <!-- Sonos Output Control -->
-        <player-sonos-control ref="sonosControl" :library-item-id="libraryItemId" :episode-id="episodeId" :current-time="currentTime" @output-changed="onOutputChanged" @sonos-state-changed="onSonosStateChanged" />
+        <player-sonos-control ref="sonosControl" :library-item-id="libraryItemId" :episode-id="episodeId" :current-time="currentTime" @output-changed="onOutputChanged" @sonos-state-changed="onSonosStateChanged" @sonos-time-update="onSonosTimeUpdate" @sonos-session-started="onSonosSessionStarted" />
       </div>
 
       <player-playback-controls :loading="loading" :seek-loading="seekLoading" :playback-rate.sync="playbackRate" :paused="paused" :hasNextChapter="hasNextChapter" :hasNextItemInQueue="hasNextItemInQueue" @prevChapter="prevChapter" @next="goToNext" @jumpForward="jumpForward" @jumpBackward="jumpBackward" @setPlaybackRate="setPlaybackRate" @playPause="playPause" />
@@ -202,6 +202,14 @@ export default {
       // Propagate Sonos play/pause state to parent
       this.$emit('sonosStateChanged', data)
     },
+    onSonosTimeUpdate(data) {
+      // Propagate Sonos time update to parent
+      this.$emit('sonosTimeUpdate', data)
+    },
+    onSonosSessionStarted(data) {
+      // Propagate Sonos session start to parent
+      this.$emit('sonosSessionStarted', data)
+    },
     toggleFullscreen(isFullscreen) {
       this.$store.commit('setPlayerIsFullscreen', isFullscreen)
     },
@@ -250,7 +258,8 @@ export default {
     },
     setVolume(volume) {
       if (this.outputMode === 'sonos' && this.$refs.sonosControl) {
-        this.$refs.sonosControl.sonosSetVolume(volume)
+        // Convert 0-1 browser volume to 0-100 Sonos volume
+        this.$refs.sonosControl.setSonosVolume(Math.round(volume * 100))
         return
       }
       this.$emit('setVolume', volume)
