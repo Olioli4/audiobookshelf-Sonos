@@ -1,23 +1,22 @@
 'use strict'
 
-const EventEmitter = require('events')
-const Logger = require('../Logger')
-
 /**
- * Abstract base class for streaming targets (Sonos, Chromecast, etc.)
- * Provides common interface and event handling for external playback devices
+ * Base class for external streaming targets (Sonos, Chromecast, AirPlay, etc.)
+ * Provides a consistent interface for casting audio to external devices
  * 
- * @extends EventEmitter
  * @abstract
  */
-class BaseStreamTarget extends EventEmitter {
+class BaseStreamTarget {
   constructor() {
-    super()
+    if (new.target === BaseStreamTarget) {
+      throw new Error('BaseStreamTarget is abstract and cannot be instantiated directly')
+    }
+    
     /** @type {string} Unique identifier for this integration */
     this.id = 'base'
-    /** @type {string} Display name */
+    /** @type {string} Human-readable name */
     this.name = 'Base Stream Target'
-    /** @type {boolean} Whether this integration is enabled */
+    /** @type {boolean} Whether the integration is enabled */
     this._enabled = false
   }
 
@@ -30,37 +29,17 @@ class BaseStreamTarget extends EventEmitter {
   }
 
   /**
-   * Initialize the integration
-   * @returns {Promise<void>}
+   * Initialize the integration with settings
+   * @param {Object} settings - Configuration settings
+   * @abstract
    */
-  async init() {
-    Logger.debug(`[${this.name}] Initializing...`)
+  init(settings) {
+    throw new Error('init() must be implemented by subclass')
   }
 
   /**
-   * Shutdown the integration
-   * @returns {Promise<void>}
-   */
-  async shutdown() {
-    Logger.debug(`[${this.name}] Shutting down...`)
-    this._enabled = false
-  }
-
-  /**
-   * Check if the integration is available and working
-   * @returns {Promise<boolean>}
-   */
-  async isAvailable() {
-    return this._enabled
-  }
-
-  // ============================================
-  // Abstract methods - must be implemented by subclasses
-  // ============================================
-
-  /**
-   * Get all available devices
-   * @returns {Promise<Array<{id: string, name: string, state: string}>>}
+   * Get available devices/zones
+   * @returns {Promise<Array<{id: string, name: string, state?: string}>>}
    * @abstract
    */
   async getDevices() {
@@ -68,8 +47,8 @@ class BaseStreamTarget extends EventEmitter {
   }
 
   /**
-   * Get state of a specific device
-   * @param {string} deviceId 
+   * Get current state of a device
+   * @param {string} deviceId - Device identifier
    * @returns {Promise<Object|null>}
    * @abstract
    */
@@ -78,20 +57,30 @@ class BaseStreamTarget extends EventEmitter {
   }
 
   /**
-   * Play audio URL on device
-   * @param {string} deviceId 
-   * @param {string} audioUrl 
-   * @param {Object} metadata 
+   * Play audio URL on a device
+   * @param {string} deviceId - Device identifier
+   * @param {string} audioUrl - URL to audio stream
+   * @param {Object} [metadata] - Optional metadata (title, artist, etc.)
    * @returns {Promise<boolean>}
    * @abstract
    */
-  async play(deviceId, audioUrl, metadata = {}) {
+  async playUrl(deviceId, audioUrl, metadata = {}) {
+    throw new Error('playUrl() must be implemented by subclass')
+  }
+
+  /**
+   * Resume playback on a device
+   * @param {string} deviceId - Device identifier
+   * @returns {Promise<boolean>}
+   * @abstract
+   */
+  async play(deviceId) {
     throw new Error('play() must be implemented by subclass')
   }
 
   /**
-   * Pause playback on device
-   * @param {string} deviceId 
+   * Pause playback on a device
+   * @param {string} deviceId - Device identifier
    * @returns {Promise<boolean>}
    * @abstract
    */
@@ -100,29 +89,19 @@ class BaseStreamTarget extends EventEmitter {
   }
 
   /**
-   * Stop playback on device
-   * @param {string} deviceId 
+   * Stop playback on a device
+   * @param {string} deviceId - Device identifier
    * @returns {Promise<boolean>}
-   * @abstract
    */
   async stop(deviceId) {
-    throw new Error('stop() must be implemented by subclass')
+    // Default implementation - pause is often equivalent to stop for streaming
+    return this.pause(deviceId)
   }
 
   /**
-   * Resume playback on device
-   * @param {string} deviceId 
-   * @returns {Promise<boolean>}
-   * @abstract
-   */
-  async resume(deviceId) {
-    throw new Error('resume() must be implemented by subclass')
-  }
-
-  /**
-   * Set volume on device
-   * @param {string} deviceId 
-   * @param {number} volume - 0-100
+   * Set volume on a device
+   * @param {string} deviceId - Device identifier
+   * @param {number} volume - Volume level (0-100)
    * @returns {Promise<boolean>}
    * @abstract
    */
@@ -131,14 +110,61 @@ class BaseStreamTarget extends EventEmitter {
   }
 
   /**
-   * Seek to position on device
-   * @param {string} deviceId 
-   * @param {number} positionSeconds 
+   * Seek to position in current track
+   * @param {string} deviceId - Device identifier
+   * @param {number} positionSeconds - Position in seconds
    * @returns {Promise<boolean>}
    * @abstract
    */
   async seek(deviceId, positionSeconds) {
     throw new Error('seek() must be implemented by subclass')
+  }
+
+  /**
+   * Skip to next track
+   * @param {string} deviceId - Device identifier
+   * @returns {Promise<boolean>}
+   */
+  async next(deviceId) {
+    // Not all targets support multi-track, return false by default
+    return false
+  }
+
+  /**
+   * Skip to previous track
+   * @param {string} deviceId - Device identifier
+   * @returns {Promise<boolean>}
+   */
+  async previous(deviceId) {
+    // Not all targets support multi-track, return false by default
+    return false
+  }
+
+  /**
+   * Check if this target supports device grouping
+   * @returns {boolean}
+   */
+  supportsGrouping() {
+    return false
+  }
+
+  /**
+   * Create a device group
+   * @param {string} coordinatorId - ID of the coordinator device
+   * @param {string[]} memberIds - IDs of devices to add to group
+   * @returns {Promise<boolean>}
+   */
+  async createGroup(coordinatorId, memberIds) {
+    return false
+  }
+
+  /**
+   * Disband a device group
+   * @param {string} coordinatorId - ID of the coordinator device
+   * @returns {Promise<boolean>}
+   */
+  async disbandGroup(coordinatorId) {
+    return false
   }
 }
 

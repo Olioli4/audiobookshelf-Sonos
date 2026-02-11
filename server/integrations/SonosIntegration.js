@@ -113,8 +113,12 @@ class SonosIntegration extends BaseStreamTarget {
    * @private
    */
   async _request(endpoint) {
+    Logger.debug(`[SonosIntegration] _request called for endpoint: ${endpoint}`)
+    Logger.debug(`[SonosIntegration] enabled check: ${this.enabled}, apiUrl: ${this.apiUrl}`)
+    
     if (!this.enabled) {
-      Logger.warn('[SonosIntegration] Sonos not configured')
+      Logger.warn('[SonosIntegration] Sonos not configured - enabled is false')
+      Logger.debug(`[SonosIntegration] _enabled: ${this._enabled}, _apiUrl: ${this._apiUrl}`)
       return null
     }
 
@@ -133,7 +137,9 @@ class SonosIntegration extends BaseStreamTarget {
         Logger.error(`[SonosIntegration] Request failed: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`)
         return null
       }
-      return await response.json()
+      const data = await response.json()
+      Logger.debug(`[SonosIntegration] Response received, data type: ${typeof data}, isArray: ${Array.isArray(data)}, length: ${Array.isArray(data) ? data.length : 'N/A'}`)
+      return data
     } catch (error) {
       if (error.name === 'AbortError') {
         Logger.error(`[SonosIntegration] Request timeout after ${this.requestTimeout}ms`)
@@ -231,25 +237,6 @@ class SonosIntegration extends BaseStreamTarget {
   async pause(deviceId) {
     const result = await this._request(`/${this._encodeRoom(deviceId)}/pause`)
     return result !== null
-  }
-
-  /**
-   * Stop playback
-   * @param {string} deviceId - Room name
-   * @returns {Promise<boolean>}
-   */
-  async stop(deviceId) {
-    const result = await this._request(`/${this._encodeRoom(deviceId)}/stop`)
-    return result !== null
-  }
-
-  /**
-   * Resume playback (alias for play)
-   * @param {string} deviceId - Room name
-   * @returns {Promise<boolean>}
-   */
-  async resume(deviceId) {
-    return this.play(deviceId)
   }
 
   /**

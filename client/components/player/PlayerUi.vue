@@ -41,6 +41,9 @@
             <span class="material-symbols text-2xl sm:text-2.5xl">settings_slow_motion</span>
           </button>
         </ui-tooltip>
+
+        <!-- Sonos Output Control -->
+        <player-sonos-control ref="sonosControl" :library-item-id="libraryItemId" :episode-id="episodeId" :current-time="currentTime" @output-changed="onOutputChanged" @sonos-state-changed="onSonosStateChanged" />
       </div>
 
       <player-playback-controls :loading="loading" :seek-loading="seekLoading" :playback-rate.sync="playbackRate" :paused="paused" :hasNextChapter="hasNextChapter" :hasNextItemInQueue="hasNextItemInQueue" @prevChapter="prevChapter" @next="goToNext" @jumpForward="jumpForward" @jumpBackward="jumpBackward" @setPlaybackRate="setPlaybackRate" @playPause="playPause" />
@@ -89,7 +92,9 @@ export default {
     isPodcast: Boolean,
     hideBookmarks: Boolean,
     hideSleepTimer: Boolean,
-    hasNextItemInQueue: Boolean
+    hasNextItemInQueue: Boolean,
+    libraryItemId: String,
+    episodeId: String
   },
   data() {
     return {
@@ -100,7 +105,8 @@ export default {
       showChaptersModal: false,
       showPlayerSettingsModal: false,
       currentTime: 0,
-      duration: 0
+      duration: 0,
+      outputMode: 'browser' // 'browser' or 'sonos'
     }
   },
   watch: {
@@ -183,6 +189,19 @@ export default {
     }
   },
   methods: {
+    onOutputChanged(data) {
+      this.outputMode = data.type
+      this.$emit('outputChanged', data)
+
+      // If switching to Sonos, mute browser audio
+      if (data.type === 'sonos') {
+        this.$emit('setVolume', 0)
+      }
+    },
+    onSonosStateChanged(data) {
+      // Propagate Sonos play/pause state to parent
+      this.$emit('sonosStateChanged', data)
+    },
     toggleFullscreen(isFullscreen) {
       this.$store.commit('setPlayerIsFullscreen', isFullscreen)
     },
@@ -195,12 +214,28 @@ export default {
       if (this.$refs.trackbar) this.$refs.trackbar.setCurrentTime(time)
     },
     playPause() {
+      if (this.outputMode === 'sonos' && this.$refs.sonosControl) {
+        if (this.paused) {
+          this.$refs.sonosControl.sonosPlay()
+        } else {
+          this.$refs.sonosControl.sonosPause()
+        }
+        return
+      }
       this.$emit('playPause')
     },
     jumpBackward() {
+      if (this.outputMode === 'sonos' && this.$refs.sonosControl) {
+        this.$refs.sonosControl.sonosJumpBackward()
+        return
+      }
       this.$emit('jumpBackward')
     },
     jumpForward() {
+      if (this.outputMode === 'sonos' && this.$refs.sonosControl) {
+        this.$refs.sonosControl.sonosJumpForward()
+        return
+      }
       this.$emit('jumpForward')
     },
     increaseVolume() {
@@ -214,6 +249,10 @@ export default {
       this.setVolume(this.volume)
     },
     setVolume(volume) {
+      if (this.outputMode === 'sonos' && this.$refs.sonosControl) {
+        this.$refs.sonosControl.sonosSetVolume(volume)
+        return
+      }
       this.$emit('setVolume', volume)
     },
     toggleMute() {
@@ -259,6 +298,10 @@ export default {
       }
     },
     seek(time) {
+      if (this.outputMode === 'sonos' && this.$refs.sonosControl) {
+        this.$refs.sonosControl.sonosSeek(time)
+        return
+      }
       this.$emit('seek', time)
     },
     restart() {
