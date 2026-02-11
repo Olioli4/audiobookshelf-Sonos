@@ -270,6 +270,7 @@ class SessionController {
   /**
    * GET: /public/session/:id/track/:index
    * While a session is open, this endpoint can be used to stream the audio track
+   * Note: index may have a file extension appended for Sonos compatibility (e.g., "1.mp3")
    *
    * @this {import('../routers/PublicRouter')}
    *
@@ -277,7 +278,9 @@ class SessionController {
    * @param {Response} res
    */
   async getTrack(req, res) {
-    const audioTrackIndex = toNumber(req.params.index, null)
+    // Strip file extension if present (Sonos requires extension for content-type detection)
+    const indexParam = req.params.index.replace(/\.[^/.]+$/, '')
+    const audioTrackIndex = toNumber(indexParam, null)
     if (audioTrackIndex === null) {
       Logger.error(`[SessionController] Invalid audio track index "${req.params.index}"`)
       return res.sendStatus(400)
