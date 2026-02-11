@@ -42,6 +42,8 @@
       :sleep-timer-type="sleepTimerType"
       :is-podcast="isPodcast"
       :hasNextItemInQueue="hasNextItemInQueue"
+      :library-item-id="libraryItemId"
+      :episode-id="currentEpisodeId"
       @playPause="playPause"
       @jumpForward="jumpForward"
       @jumpBackward="jumpBackward"
@@ -53,6 +55,8 @@
       @showBookmarks="showBookmarks"
       @showSleepTimer="showSleepTimerModal = true"
       @showPlayerQueueItems="showPlayerQueueItemsModal = true"
+      @outputChanged="onOutputChanged"
+      @sonosStateChanged="onSonosStateChanged"
     />
 
     <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="bookmarkCurrentTime" :playback-rate="currentPlaybackRate" :library-item-id="libraryItemId" @select="selectBookmark" />
@@ -86,7 +90,10 @@ export default {
       currentPlaybackRate: 1,
       syncFailedToast: null,
       coverAspectRatio: 1,
-      lastChapterId: null
+      lastChapterId: null,
+      // Sonos output state
+      outputMode: 'browser', // 'browser' or 'sonos'
+      sonosRoom: null
     }
   },
   computed: {
@@ -125,6 +132,9 @@ export default {
       if (!this.$store.state.streamEpisodeId) return null
       const episodes = this.streamLibraryItem.media.episodes || []
       return episodes.find((ep) => ep.id === this.$store.state.streamEpisodeId)
+    },
+    currentEpisodeId() {
+      return this.$store.state.streamEpisodeId || null
     },
     libraryItemId() {
       return this.streamLibraryItem?.id || null
@@ -169,6 +179,19 @@ export default {
     hasNextItemInQueue() {
       return this.currentPlayerQueueIndex < this.playerQueueItems.length - 1
     },
+    currentTrackIno() {
+      // Get the ino of the currently playing audio file
+      // For podcasts, use the episode's audioFile ino
+      if (this.streamEpisode && this.streamEpisode.audioFile) {
+        return this.streamEpisode.audioFile.ino || null
+      }
+      // For books, use the first audio file ino (could be enhanced to track current position)
+      const audioFiles = this.media.audioFiles || []
+      if (audioFiles.length) {
+        return audioFiles[0].ino || null
+      }
+      return null
+    },
     currentPlayerQueueIndex() {
       if (!this.libraryItemId) return -1
       return this.playerQueueItems.findIndex((i) => {
@@ -181,6 +204,27 @@ export default {
     }
   },
   methods: {
+    onOutputChanged(data) {
+      this.outputMode = data.type
+      if (data.type === 'sonos') {
+        this.sonosRoom = data.room
+        // Mute browser audio when playing on Sonos
+        if (this.playerHandler?.player) {
+          this.playerHandler.player.setVolume(0)
+        }
+      } else {
+        this.sonosRoom = null
+        // Restore browser volume
+        const savedVolume = localStorage.getItem('audiobookshelf-volume') || 1
+        if (this.playerHandler?.player) {
+          this.playerHandler.player.setVolume(parseFloat(savedVolume))
+        }
+      }
+    },
+    onSonosStateChanged(data) {
+      // Update isPlaying state when Sonos play/pause happens
+      this.setPlaying(data.isPlaying)
+    },
     mediaFinished(libraryItemId, episodeId) {
       // Play next item in queue
       if (!this.playerQueueItems.length || !this.$store.state.playerQueueAutoPlay) {

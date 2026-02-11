@@ -124,7 +124,15 @@ class SonosRouter {
    */
   async _getZones(req, res) {
     try {
+      // Debug logging to trace Sonos connection issues
+      Logger.debug(`[SonosRouter] _getZones called`)
+      Logger.debug(`[SonosRouter] sonos.enabled: ${this.sonos?.enabled}`)
+      Logger.debug(`[SonosRouter] sonos.apiUrl: ${this.sonos?.apiUrl}`)
+      Logger.debug(`[SonosRouter] Database.serverSettings.sonosEnabled: ${require('../Database').serverSettings?.sonosEnabled}`)
+      Logger.debug(`[SonosRouter] Database.serverSettings.sonosApiUrl: ${require('../Database').serverSettings?.sonosApiUrl}`)
+      
       const zones = await this.sonos.getDevices()
+      Logger.debug(`[SonosRouter] getDevices returned ${zones?.length || 0} zones`)
       res.json({ zones })
     } catch (error) {
       Logger.error('[SonosRouter] Error getting zones:', error)
