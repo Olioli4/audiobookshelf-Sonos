@@ -240,13 +240,15 @@ class SonosIntegration extends BaseStreamTarget {
   }
 
   /**
-   * Set volume (0-100)
-   * @param {string} deviceId - Room name
-   * @param {number} volume 
+   * Set volume (0-100) for the group
+   * Uses groupVolume to set volume on all grouped speakers
+   * @param {string} deviceId - Room name (coordinator)
+   * @param {number} volume
    * @returns {Promise<boolean>}
    */
   async setVolume(deviceId, volume) {
-    const result = await this._request(`/${this._encodeRoom(deviceId)}/volume/${Math.round(volume)}`)
+    // Use groupVolume to set volume on all grouped speakers
+    const result = await this._request(`/${this._encodeRoom(deviceId)}/groupVolume/${Math.round(volume)}`)
     return result !== null
   }
 
