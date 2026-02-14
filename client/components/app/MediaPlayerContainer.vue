@@ -233,14 +233,14 @@ export default {
         // Switching back from Sonos to browser
         const sonosPosition = data.currentTime || this.currentTime // Use event position or fallback to synced time
         console.log('[MediaPlayerContainer] Switching to browser, seeking to Sonos position:', sonosPosition)
-        
+
         // Close the Sonos session to save progress
         if (this.playerHandler?.currentSessionId) {
           console.log('[MediaPlayerContainer] Closing Sonos session:', this.playerHandler.currentSessionId)
           this.playerHandler.sendCloseSession()
           this.playerHandler.currentSessionId = null
         }
-        
+
         this.sonosRoom = null
         // Restore browser volume and create new session
         const savedVolume = localStorage.getItem('audiobookshelf-volume') || 1
