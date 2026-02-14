@@ -93,6 +93,7 @@ class PlaybackSessionManager {
    * @param {import('express').Response} res
    */
   async syncSessionRequest(user, session, payload, res) {
+    Logger.info(`[PlaybackSessionManager] syncSessionRequest: sessionId=${session.id}, payload=${JSON.stringify(payload)}`)
     if (await this.syncSession(user, session, payload)) {
       res.sendStatus(200)
     } else {
@@ -315,7 +316,9 @@ class PlaybackSessionManager {
     const userSessions = this.sessions.filter((playbackSession) => playbackSession.userId === user.id && playbackSession.deviceId === deviceInfo.id)
     for (const session of userSessions) {
       Logger.info(`[PlaybackSessionManager] startSession: Closing open session "${session.displayTitle}" for user "${user.username}" (Device: ${session.deviceDescription})`)
-      await this.closeSession(user, session, null)
+      // Sync session's current progress before closing so position is saved
+      const syncData = session.currentTime > 0 ? { currentTime: session.currentTime, timeListened: 0 } : null
+      await this.closeSession(user, session, syncData)
     }
 
     const shouldDirectPlay = options.forceDirectPlay || (!options.forceTranscode && libraryItem.media.checkCanDirectPlay(options.supportedMimeTypes, episodeId))
@@ -419,9 +422,11 @@ class PlaybackSessionManager {
    * @returns
    */
   async closeSession(user, session, syncData = null) {
+    Logger.info(`[PlaybackSessionManager] closeSession: sessionId=${session.id}, syncData=${JSON.stringify(syncData)}`)
     if (syncData) {
       await this.syncSession(user, session, syncData)
     } else {
+      Logger.info(`[PlaybackSessionManager] closeSession: No syncData, just saving session (no progress update)`)
       await this.saveSession(session)
     }
     Logger.debug(`[PlaybackSessionManager] closeSession "${session.id}"`)

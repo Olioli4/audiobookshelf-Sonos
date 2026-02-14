@@ -4,6 +4,14 @@ const Path = require('path')
 const express = require('express')
 const Logger = require('../Logger')
 const Database = require('../Database')
+const DeviceInfo = require('../objects/DeviceInfo')
+
+// Sonos timing constants
+const SEEK_INITIAL_DELAY_MS = 3000
+const SEEK_RETRY_DELAY_MS = 2000
+const POSITION_TOLERANCE_SECONDS = 10
+const GROUP_FORMATION_DELAY_MS = 500
+const MAX_SEEK_ATTEMPTS = 3
 
 /**
  * @typedef {import('../integrations/SonosIntegration')} SonosIntegration
@@ -12,7 +20,7 @@ const Database = require('../Database')
 
 /**
  * Sonos Router - handles all Sonos-related API endpoints
- * 
+ *
  * Routes:
  * - GET  /api/sonos/status - Check integration status
  * - GET  /api/sonos/zones - List available speakers
@@ -32,8 +40,8 @@ const Database = require('../Database')
  */
 class SonosRouter {
   /**
-   * @param {SonosIntegration} sonosIntegration 
-   * @param {PlaybackSessionManager} playbackSessionManager 
+   * @param {SonosIntegration} sonosIntegration
+   * @param {PlaybackSessionManager} playbackSessionManager
    */
   constructor(sonosIntegration, playbackSessionManager) {
     /** @type {SonosIntegration} */
@@ -42,7 +50,7 @@ class SonosRouter {
     this.playbackSessionManager = playbackSessionManager
     /** @type {express.Router} */
     this.router = express.Router()
-    
+
     this._initRoutes()
   }
 
@@ -88,7 +96,7 @@ class SonosRouter {
    */
   _requireEnabled(req, res, next) {
     if (!this.sonos.enabled) {
-      return res.status(503).json({ 
+      return res.status(503).json({
         error: 'Sonos integration not configured',
         hint: 'Enable Sonos in Settings → Sonos Integration'
       })
@@ -130,7 +138,7 @@ class SonosRouter {
       Logger.debug(`[SonosRouter] sonos.apiUrl: ${this.sonos?.apiUrl}`)
       Logger.debug(`[SonosRouter] Database.serverSettings.sonosEnabled: ${require('../Database').serverSettings?.sonosEnabled}`)
       Logger.debug(`[SonosRouter] Database.serverSettings.sonosApiUrl: ${require('../Database').serverSettings?.sonosApiUrl}`)
-      
+
       const zones = await this.sonos.getDevices()
       Logger.debug(`[SonosRouter] getDevices returned ${zones?.length || 0} zones`)
       res.json({ zones })
@@ -168,6 +176,8 @@ class SonosRouter {
       const { roomName } = req.params
       const { libraryItemId, episodeId, startTime } = req.body
 
+      Logger.info(`[SonosRouter] _playItem called: room=${roomName}, libraryItemId=${libraryItemId}, episodeId=${episodeId}, startTime=${startTime} (type: ${typeof startTime})`)
+
       // Validation
       if (!libraryItemId) {
         return res.status(400).json({ error: 'libraryItemId is required' })
@@ -178,27 +188,27 @@ class SonosRouter {
         return res.status(404).json({ error: 'Library item not found' })
       }
 
-      if (libraryItem.mediaType === 'podcast' && !episodeId) {
-        return res.status(400).json({ error: 'episodeId is required for podcasts' })
+      // Create or get Sonos device from database
+      const deviceId = `sonos-${roomName}`
+      let deviceInfo = await Database.deviceModel.getOldDeviceByDeviceId(deviceId)
+
+      if (!deviceInfo) {
+        // Create new device
+        deviceInfo = new DeviceInfo()
+        deviceInfo.id = deviceId
+        deviceInfo.userId = req.user.id
+        deviceInfo.deviceId = deviceId
+        deviceInfo.deviceType = 'sonos-speaker'
+        deviceInfo.clientName = 'Sonos'
+        deviceInfo.manufacturer = 'Sonos'
+        deviceInfo.model = roomName
+        deviceInfo.deviceName = `Sonos: ${roomName}`
+
+        await Database.deviceModel.createFromOld(deviceInfo)
+        Logger.info(`[SonosRouter] Created new device: ${deviceId}`)
       }
 
-      // Create playback session
-      const deviceInfo = {
-        id: `sonos-${roomName}`,
-        deviceDescription: `Sonos: ${roomName}`,
-        deviceType: 'sonos-speaker',
-        clientName: 'Sonos',
-        manufacturer: 'Sonos',
-        model: roomName
-      }
-
-      const session = await this.playbackSessionManager.startSession(
-        req.user,
-        deviceInfo,
-        libraryItem,
-        episodeId,
-        { forceDirectPlay: true, mediaPlayer: 'sonos' }
-      )
+      const session = await this.playbackSessionManager.startSession(req.user, deviceInfo, libraryItem, episodeId, { forceDirectPlay: true, mediaPlayer: 'sonos' })
 
       if (!session) {
         return res.status(500).json({ error: 'Failed to create playback session' })
@@ -208,43 +218,93 @@ class SonosRouter {
         return res.status(500).json({ error: 'No audio tracks available' })
       }
 
-      // Build streaming URL
-      const streamUrl = this._buildStreamUrl(req, session)
+      // Calculate seek position first - prefer explicit startTime from request, fallback to session's saved position
+      const requestStartTime = typeof startTime === 'number' ? startTime : parseFloat(startTime)
+      const totalSeekPosition = !isNaN(requestStartTime) ? requestStartTime : session.startTime
+
+      Logger.info(`[SonosRouter] Seek calculation: requestStartTime=${requestStartTime}, session.startTime=${session.startTime}, totalSeekPosition=${totalSeekPosition}`)
+
+      // Build streaming URL - selects correct track for multi-track audiobooks
+      const { url: streamUrl, trackSeekOffset, trackStartOffset, trackDuration } = this._buildStreamUrl(req, session, totalSeekPosition)
+
+      Logger.info(`[SonosRouter] Stream URL: ${streamUrl}, trackSeekOffset: ${trackSeekOffset}s, trackStartOffset: ${trackStartOffset}s`)
 
       // Auto-group if configured
       await this._autoGroupIfConfigured(roomName)
 
-      // Play on Sonos
+      // Play on Sonos - if seeking needed, pause immediately then seek then resume
+      const needsSeek = trackSeekOffset && trackSeekOffset > 0
       const success = await this.sonos.playUrl(roomName, streamUrl)
-      
+
       if (success) {
         Logger.info(`[SonosRouter] Started playback on ${roomName}`)
-        
-        // Seek to start position if provided (after a small delay for playback to initialize)
-        if (startTime && startTime > 0) {
-          setTimeout(async () => {
+
+        if (needsSeek) {
+          // Pause immediately to prevent audio playing from beginning
+          await this.sonos.pause(roomName)
+          Logger.info(`[SonosRouter] Paused for seek to ${trackSeekOffset}s`)
+
+          // Wait for stream to load, then seek and resume
+          const performSeekAndResume = async (attempt = 1) => {
             try {
-              await this.sonos.seek(roomName, startTime)
-              Logger.info(`[SonosRouter] Seeked to ${startTime}s on ${roomName}`)
+              const seekResult = await this.sonos.seek(roomName, trackSeekOffset)
+              Logger.info(`[SonosRouter] Seek attempt ${attempt}: seeked to ${trackSeekOffset}s, result=${seekResult}`)
+
+              // Small delay to let seek complete, then resume
+              await new Promise((resolve) => setTimeout(resolve, 500))
+              await this.sonos.play(roomName)
+              Logger.info(`[SonosRouter] Resumed playback after seek`)
+
+              // Verify position
+              setTimeout(async () => {
+                try {
+                  const state = await this.sonos.getDeviceState(roomName)
+                  const currentPos = state?.elapsedTime || state?.trackPosition || 0
+                  Logger.info(`[SonosRouter] Position check: currentPosition=${currentPos}, expected=${trackSeekOffset}`)
+                  if (currentPos < trackSeekOffset - POSITION_TOLERANCE_SECONDS && attempt < MAX_SEEK_ATTEMPTS) {
+                    Logger.warn(`[SonosRouter] Position mismatch - retrying`)
+                    await this.sonos.pause(roomName)
+                    performSeekAndResume(attempt + 1)
+                  }
+                } catch (e) {
+                  Logger.debug(`[SonosRouter] Position check failed: ${e.message}`)
+                }
+              }, SEEK_RETRY_DELAY_MS)
             } catch (seekError) {
-              Logger.error(`[SonosRouter] Failed to seek to start position: ${seekError.message}`)
+              Logger.error(`[SonosRouter] Seek attempt ${attempt} failed: ${seekError.message}`)
+              if (attempt < MAX_SEEK_ATTEMPTS) {
+                setTimeout(() => performSeekAndResume(attempt + 1), SEEK_RETRY_DELAY_MS)
+              } else {
+                // Give up on seeking, just resume playback from beginning
+                await this.sonos.play(roomName)
+                Logger.warn(`[SonosRouter] Seek failed after ${MAX_SEEK_ATTEMPTS} attempts, resuming from current position`)
+              }
             }
-          }, 1000)
+          }
+
+          // Start seek after initial delay to let stream load
+          setTimeout(() => performSeekAndResume(1), SEEK_INITIAL_DELAY_MS)
+        } else {
+          Logger.info(`[SonosRouter] No seek needed (trackSeekOffset=${trackSeekOffset})`)
         }
-        
+
         res.json({
           success: true,
           sessionId: session.id,
           streamUrl,
           trackCount: session.audioTracks.length,
+          trackStartOffset,
+          trackDuration,
           displayTitle: session.displayTitle
         })
       } else {
         Logger.error(`[SonosRouter] Playback failed for: ${streamUrl}`)
+        // Clean up orphaned session
+        this.playbackSessionManager.removeSession(session.id)
         res.status(500).json({
           error: 'Failed to play on Sonos — check sonosServerUrl setting',
           streamUrl,
-          hint: 'Set sonosServerUrl to your server\'s LAN IP (e.g., http://192.168.1.x:13378)'
+          hint: "Set sonosServerUrl to your server's LAN IP (e.g., http://192.168.1.x:13378)"
         })
       }
     } catch (error) {
@@ -254,15 +314,16 @@ class SonosRouter {
   }
 
   /**
-   * Build the streaming URL for Sonos
-   * @param {express.Request} req 
+   * Build the streaming URL for Sonos, selecting correct track for seek position
+   * @param {express.Request} req
    * @param {Object} session - Playback session
-   * @returns {string}
+   * @param {number} [seekPosition] - Desired playback position in seconds
+   * @returns {{url: string, trackSeekOffset: number}}
    * @private
    */
-  _buildStreamUrl(req, session) {
+  _buildStreamUrl(req, session, seekPosition = 0) {
     const basePath = global.RouterBasePath || ''
-    
+
     // Prefer configured sonosServerUrl
     let baseUrl = this.sonos.serverUrl
     if (!baseUrl) {
@@ -272,13 +333,47 @@ class SonosRouter {
       Logger.warn('[SonosRouter] No sonosServerUrl configured, using request host')
     }
 
-    const firstTrack = session.audioTracks[0]
-    const trackIndex = firstTrack.index ?? 1
-    
+    // For multi-track audiobooks, find the track containing the seek position
+    let targetTrack = session.audioTracks[0]
+    let trackSeekOffset = seekPosition
+
+    // Single-track boundary check: clamp seek to track duration
+    if (session.audioTracks.length === 1 && targetTrack.duration > 0) {
+      trackSeekOffset = Math.min(seekPosition, targetTrack.duration - 1)
+    } else if (seekPosition > 0 && session.audioTracks.length > 1) {
+      let cumulativeTime = 0
+      let foundTrack = false
+      for (const track of session.audioTracks) {
+        if (cumulativeTime + track.duration > seekPosition) {
+          targetTrack = track
+          trackSeekOffset = seekPosition - cumulativeTime
+          foundTrack = true
+          Logger.info(`[SonosRouter] Multi-track: position ${seekPosition}s is in track ${track.index} (offset ${trackSeekOffset}s, track duration ${track.duration}s)`)
+          break
+        }
+        cumulativeTime += track.duration
+      }
+      // If position is beyond all tracks, use last track
+      if (!foundTrack) {
+        targetTrack = session.audioTracks[session.audioTracks.length - 1]
+        trackSeekOffset = targetTrack.duration - 1 // Near end of last track
+        Logger.warn(`[SonosRouter] Position ${seekPosition}s beyond total duration (${cumulativeTime}s), using end of last track`)
+      }
+    }
+
+    const trackIndex = targetTrack.index ?? 1
+    const trackStartOffset = targetTrack.startOffset || 0
+    const trackDuration = targetTrack.duration || 0
+
     // Sonos requires file extension for content-type detection
-    const fileExt = firstTrack.metadata?.path ? Path.extname(firstTrack.metadata.path) : '.mp3'
-    
-    return `${baseUrl}${basePath}/public/session/${session.id}/track/${trackIndex}${fileExt}`
+    const fileExt = targetTrack.metadata?.path ? Path.extname(targetTrack.metadata.path) : '.mp3'
+
+    return {
+      url: `${baseUrl}${basePath}/public/session/${session.id}/track/${trackIndex}${fileExt}`,
+      trackSeekOffset,
+      trackStartOffset,
+      trackDuration
+    }
   }
 
   /**
@@ -291,7 +386,7 @@ class SonosRouter {
     if (defaultGroup.length > 0) {
       Logger.info(`[SonosRouter] Auto-grouping: ${roomName} + ${defaultGroup.join(', ')}`)
       await this.sonos.createGroup(roomName, defaultGroup)
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await new Promise((resolve) => setTimeout(resolve, GROUP_FORMATION_DELAY_MS))
     }
   }
 
@@ -350,11 +445,33 @@ class SonosRouter {
   async _seek(req, res) {
     try {
       const { position } = req.body
+      const roomName = req.params.roomName
       if (position === undefined || position < 0) {
         return res.status(400).json({ error: 'Position must be a positive number' })
       }
-      const success = await this.sonos.seek(req.params.roomName, position)
-      res.json({ success })
+      
+      const seekSuccess = await this.sonos.seek(roomName, position)
+      if (!seekSuccess) {
+        return res.json({ success: false, error: 'Seek command failed' })
+      }
+      
+      // Verify the seek actually worked by checking position
+      await new Promise(resolve => setTimeout(resolve, 500))
+      const state = await this.sonos.getDeviceState(roomName)
+      if (state && state.elapsedTime !== undefined) {
+        const actualPosition = state.elapsedTime
+        const diff = Math.abs(actualPosition - position)
+        if (diff <= POSITION_TOLERANCE_SECONDS) {
+          Logger.debug(`[SonosRouter] Seek verified: requested=${position}s, actual=${actualPosition}s`)
+          return res.json({ success: true, actualPosition })
+        } else {
+          Logger.warn(`[SonosRouter] Seek position mismatch: requested=${position}s, actual=${actualPosition}s, diff=${diff}s`)
+          return res.json({ success: false, error: 'Position mismatch', requestedPosition: position, actualPosition })
+        }
+      }
+      
+      // Couldn't verify but seek command succeeded
+      res.json({ success: true, verified: false })
     } catch (error) {
       Logger.error('[SonosRouter] Error seeking:', error)
       res.status(500).json({ error: 'Failed to seek' })

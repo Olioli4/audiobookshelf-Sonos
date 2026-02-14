@@ -147,6 +147,13 @@ export default class PlayerHandler {
       this.startPlayInterval()
     } else {
       this.stopPlayInterval()
+      // Sync progress immediately when pausing to ensure position is saved
+      if (this.player && this.currentSessionId) {
+        const currentTime = this.player.getCurrentTime()
+        if (currentTime > 0) {
+          this.sendProgressSync(currentTime)
+        }
+      }
     }
 
     if (this.player) {

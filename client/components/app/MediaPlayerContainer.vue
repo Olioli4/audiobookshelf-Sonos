@@ -57,6 +57,8 @@
       @showPlayerQueueItems="showPlayerQueueItemsModal = true"
       @outputChanged="onOutputChanged"
       @sonosStateChanged="onSonosStateChanged"
+      @sonosTimeUpdate="onSonosTimeUpdate"
+      @sonosSessionStarted="onSonosSessionStarted"
     />
 
     <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :current-time="bookmarkCurrentTime" :playback-rate="currentPlaybackRate" :library-item-id="libraryItemId" @select="selectBookmark" />
@@ -93,7 +95,9 @@ export default {
       lastChapterId: null,
       // Sonos output state
       outputMode: 'browser', // 'browser' or 'sonos'
-      sonosRoom: null
+      sonosRoom: null,
+      sonosListeningTime: 0,
+      sonosLastSyncTime: 0
     }
   },
   computed: {
@@ -206,24 +210,84 @@ export default {
   methods: {
     onOutputChanged(data) {
       this.outputMode = data.type
+      // Reset Sonos sync tracking on output change
+      this.sonosListeningTime = 0
+      this.sonosLastSyncTime = 0
+      
       if (data.type === 'sonos') {
         this.sonosRoom = data.room
-        // Mute browser audio when playing on Sonos
+        // Note: Don't call sendCloseSession here - the server's startSession will
+        // close existing sessions for this user. Calling close here races with the
+        // playOnSonos() call and can cause double-close or stale progress sync.
+        // Stop the browser player's sync interval and pause audio
+        if (this.playerHandler) {
+          this.playerHandler.stopPlayInterval()
+          // Clear session ID so browser player doesn't sync while Sonos is active
+          this.playerHandler.currentSessionId = null
+        }
+        // Pause browser audio when playing on Sonos
         if (this.playerHandler?.player) {
-          this.playerHandler.player.setVolume(0)
+          this.playerHandler.player.pause()
         }
       } else {
+        // Switching back from Sonos to browser
+        const sonosPosition = data.currentTime || this.currentTime // Use event position or fallback to synced time
+        console.log('[MediaPlayerContainer] Switching to browser, seeking to Sonos position:', sonosPosition)
+        
+        // Close the Sonos session to save progress
+        if (this.playerHandler?.currentSessionId) {
+          console.log('[MediaPlayerContainer] Closing Sonos session:', this.playerHandler.currentSessionId)
+          this.playerHandler.sendCloseSession()
+          this.playerHandler.currentSessionId = null
+        }
+        
         this.sonosRoom = null
-        // Restore browser volume
+        // Restore browser volume and create new session
         const savedVolume = localStorage.getItem('audiobookshelf-volume') || 1
-        if (this.playerHandler?.player) {
-          this.playerHandler.player.setVolume(parseFloat(savedVolume))
+        if (this.playerHandler) {
+          // Store position to seek to after new session starts
+          this.playerHandler.startTimeOverride = sonosPosition
+          this.playerHandler.playWhenReady = true
+          // Create new browser session and play
+          this.playerHandler.prepare()
+          if (this.playerHandler.player) {
+            this.playerHandler.player.setVolume(parseFloat(savedVolume))
+          }
         }
       }
     },
     onSonosStateChanged(data) {
       // Update isPlaying state when Sonos play/pause happens
+      console.log('[MediaPlayerContainer] onSonosStateChanged:', data)
       this.setPlaying(data.isPlaying)
+    },
+    onSonosTimeUpdate(data) {
+      // Update time position from Sonos state
+      console.log('[MediaPlayerContainer] onSonosTimeUpdate:', data)
+      if (typeof data.currentTime === 'number') {
+        this.setCurrentTime(data.currentTime)
+        
+        // Sync progress to server periodically (every ~10s of listening)
+        // Poll fires every 2s, so track accumulated time
+        this.sonosListeningTime += 2
+        if (this.sonosListeningTime >= 10 && this.playerHandler?.currentSessionId) {
+          const diffSinceLastSync = Math.abs(this.sonosLastSyncTime - data.currentTime)
+          if (diffSinceLastSync >= 1) {
+            console.log('[MediaPlayerContainer] Syncing Sonos progress:', data.currentTime)
+            this.playerHandler.listeningTimeSinceSync = this.sonosListeningTime
+            this.playerHandler.sendProgressSync(data.currentTime)
+            this.sonosLastSyncTime = data.currentTime
+          }
+          this.sonosListeningTime = 0
+        }
+      }
+    },
+    onSonosSessionStarted(data) {
+      // Track the Sonos session ID so progress syncs work
+      console.log('[MediaPlayerContainer] onSonosSessionStarted:', data)
+      if (data.sessionId && this.playerHandler) {
+        this.playerHandler.currentSessionId = data.sessionId
+      }
     },
     mediaFinished(libraryItemId, episodeId) {
       // Play next item in queue
