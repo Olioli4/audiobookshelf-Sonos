@@ -1,23 +1,43 @@
-### EXAMPLE DOCKER COMPOSE ###
-### For Audiobookshelf-Sonos Fork ###
+### DOCKER COMPOSE FOR AUDIOBOOKSHELF-SONOS ###
+#
+# IMPORTANT: Docker Desktop Limitations
+# =====================================
+# Docker Desktop (Windows/macOS) runs containers inside a VM, which means:
+# 1. Sonos SSDP discovery will NOT work - speakers must be configured manually
+# 2. You must set SONOS_SERVER_URL to your host machine's LAN IP (e.g., 192.168.1.x)
+#
+# For full Sonos auto-discovery, run on native Linux Docker with network_mode: host
+# (see commented alternative configuration below)
+#
 services:
-  # Sonos HTTP API - required for Sonos integration
+  # Sonos HTTP API - bridge between Audiobookshelf and Sonos speakers
+  # NOTE: Without host networking, SSDP speaker discovery is disabled.
+  #       Configure speakers manually in the sonos-http-api settings.
   sonos-api:
     build: ./sonos-http-api
     container_name: sonos-api
-    network_mode: host  # Required for SSDP discovery of Sonos speakers
+    ports:
+      - "5005:5005"
+    networks:
+      - abs-network
     restart: unless-stopped
+    # FOR NATIVE LINUX DOCKER with auto-discovery, uncomment below and remove ports/networks:
+    # network_mode: host
 
   audiobookshelf:
     build: .
     container_name: audiobookshelf
-    # ABS runs on port 13378 by default. If you want to change
-    # the port, only change the external port, not the internal port
     ports:
-      - 13378:80
+      - "13378:13378"
+    networks:
+      - abs-network
     environment:
-      # Point to sonos-api running on host network
-      - SONOS_API_URL=http://host.docker.internal:5005
+      - PORT=13378
+      # URL for audiobookshelf to reach sonos-api (container-to-container)
+      - SONOS_API_URL=http://sonos-api:5005
+      # URL for Sonos speakers to reach audiobookshelf (must be your LAN IP!)
+      # REQUIRED: Change 192.168.1.x to your actual host machine IP
+      - SONOS_SERVER_URL=http://192.168.1.x:13378
     volumes:
       # These volumes are needed to keep your library persistent
       # and allow media to be accessed by the ABS server.
@@ -39,3 +59,33 @@ services:
     # docker container as a specific user. You will need to change
     # the UID and GID to the correct values for your user.
     # user: 1000:1000
+
+networks:
+  abs-network:
+    driver: bridge
+
+### ALTERNATIVE: Native Linux Docker with Full Sonos Discovery ###
+# Uncomment this section and comment out the above services for native Linux:
+#
+# services:
+#   sonos-api:
+#     build: ./sonos-http-api
+#     container_name: sonos-api
+#     network_mode: host
+#     restart: unless-stopped
+#
+#   audiobookshelf:
+#     build: .
+#     container_name: audiobookshelf
+#     network_mode: host
+#     environment:
+#       - PORT=13378
+#       - SONOS_API_URL=http://localhost:5005
+#     volumes:
+#       - ./audiobooks:/audiobooks
+#       - ./podcasts:/podcasts
+#       - ./metadata:/metadata
+#       - ./config:/config
+#     restart: unless-stopped
+#     depends_on:
+#       - sonos-api
