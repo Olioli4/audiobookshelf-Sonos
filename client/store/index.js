@@ -7,6 +7,7 @@ export const state = () => ({
   versionData: null,
   serverSettings: null,
   playbackSessionId: null,
+  sonosSessionId: null,
   streamLibraryItem: null,
   streamEpisodeId: null,
   streamIsPlaying: false,
@@ -158,6 +159,9 @@ export const mutations = {
   },
   setPlaybackSessionId(state, playbackSessionId) {
     state.playbackSessionId = playbackSessionId
+  },
+  setSonosSessionId(state, sonosSessionId) {
+    state.sonosSessionId = sonosSessionId
   },
   setMediaPlaying(state, payload) {
     if (!payload) {

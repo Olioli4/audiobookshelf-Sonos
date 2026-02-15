@@ -18,9 +18,16 @@
         </ui-btn>
       </div>
       <div ref="episodeContainer" id="episodes-scroll" class="w-full overflow-x-hidden overflow-y-auto">
-        <div v-for="(episode, index) in episodesList" :key="index" class="relative" :class="episode.isDownloaded || episode.isDownloading ? 'bg-primary/40' : selectedEpisodes[episode.cleanUrl] ? 'cursor-pointer bg-success/10' : index % 2 == 0 ? 'cursor-pointer bg-primary/25 hover:bg-primary/40' : 'cursor-pointer bg-primary/5 hover:bg-primary/25'" @click="toggleSelectEpisode(episode)">
+        <div
+          v-for="(episode, index) in episodesList"
+          :key="index"
+          class="relative"
+          :class="episode.isDownloaded || episode.isUrlSource || episode.isDownloading ? 'bg-primary/40' : selectedEpisodes[episode.cleanUrl] ? 'cursor-pointer bg-success/10' : index % 2 == 0 ? 'cursor-pointer bg-primary/25 hover:bg-primary/40' : 'cursor-pointer bg-primary/5 hover:bg-primary/25'"
+          @click="toggleSelectEpisode(episode)"
+        >
           <div class="absolute top-0 left-0 h-full flex items-center p-2">
-            <span v-if="episode.isDownloaded" class="material-symbols text-success text-xl">download_done</span>
+            <span v-if="episode.isUrlSource" class="material-symbols text-warning text-xl" title="Added as URL">cloud</span>
+            <span v-else-if="episode.isDownloaded" class="material-symbols text-success text-xl" title="Downloaded">download_done</span>
             <span v-else-if="episode.isDownloading" class="material-symbols text-warning text-xl">download</span>
             <ui-checkbox v-else v-model="selectedEpisodes[episode.cleanUrl]" small checkbox-bg="primary" border-color="gray-600" />
           </div>
@@ -46,10 +53,11 @@
           </div>
         </div>
       </div>
-      <div class="flex justify-end pt-4">
+      <div class="flex justify-end pt-4 items-center">
         <ui-checkbox v-if="!allDownloaded" v-model="selectAll" @input="toggleSelectAll" :label="selectAllLabel" small checkbox-bg="primary" border-color="gray-600" class="mx-8" />
+        <ui-btn v-if="!allDownloaded" :disabled="!episodesSelected.length" color="primary" class="mr-2" @click="submitAsUrl">Add as URL</ui-btn>
         <ui-btn v-if="!allDownloaded" :disabled="!episodesSelected.length" @click="submit">{{ buttonText }}</ui-btn>
-        <p v-else class="text-success text-base px-2 py-4">{{ $strings.LabelAllEpisodesDownloaded }}</p>
+        <p v-else class="text-success text-base px-2 py-4">All episodes added to library</p>
       </div>
     </div>
   </modals-modal>
@@ -87,6 +95,7 @@ export default {
       searchText: null,
       downloadedEpisodeGuidMap: {},
       downloadedEpisodeUrlMap: {},
+      urlSourceEpisodeMap: {},
       sortDescending: true
     }
   },
@@ -127,7 +136,7 @@ export default {
       return this.libraryItem.media.metadata.title || 'Unknown'
     },
     allDownloaded() {
-      return !this.episodesCleaned.some((episode) => !this.getIsEpisodeDownloaded(episode))
+      return !this.episodesCleaned.some((episode) => !this.getIsEpisodeDownloaded(episode) && !this.getIsUrlSourceEpisode(episode))
     },
     episodesSelected() {
       return Object.keys(this.selectedEpisodes).filter((key) => !!this.selectedEpisodes[key])
@@ -174,6 +183,9 @@ export default {
         return true
       }
       return false
+    },
+    getIsUrlSourceEpisode(episode) {
+      return !!this.urlSourceEpisodeMap[episode.cleanUrl]
     },
     getIsEpisodeDownloadingOrQueued(episode) {
       const episodesToCheck = [...this.episodesDownloading, ...this.downloadQueue]
@@ -223,13 +235,13 @@ export default {
     },
     toggleSelectAll(val) {
       for (const episode of this.episodesList) {
-        if (episode.isDownloaded || episode.isDownloading) this.selectedEpisodes[episode.cleanUrl] = false
+        if (episode.isDownloaded || episode.isDownloading || episode.isUrlSource) this.selectedEpisodes[episode.cleanUrl] = false
         else this.$set(this.selectedEpisodes, episode.cleanUrl, val)
       }
     },
     checkSetIsSelectedAll() {
       for (const episode of this.episodesList) {
-        if (!episode.isDownloaded && !episode.isDownloading && !this.selectedEpisodes[episode.cleanUrl]) {
+        if (!episode.isDownloaded && !episode.isDownloading && !episode.isUrlSource && !this.selectedEpisodes[episode.cleanUrl]) {
           this.selectAll = false
           return
         }
@@ -237,7 +249,7 @@ export default {
       this.selectAll = true
     },
     toggleSelectEpisode(episode) {
-      if (episode.isDownloaded || episode.isDownloading) return
+      if (episode.isDownloaded || episode.isDownloading || episode.isUrlSource) return
       this.$set(this.selectedEpisodes, episode.cleanUrl, !this.selectedEpisodes[episode.cleanUrl])
       this.checkSetIsSelectedAll()
     },
@@ -272,17 +284,51 @@ export default {
           this.selectAll = false
         })
     },
+    submitAsUrl() {
+      let episodesToAdd = []
+      if (this.episodesSelected.length) {
+        episodesToAdd = this.episodesSelected.map((cleanUrl) => this.episodesCleaned.find((ep) => ep.cleanUrl == cleanUrl))
+      }
+
+      const payloadSize = JSON.stringify(episodesToAdd).length
+      const sizeInMb = payloadSize / 1024 / 1024
+      const sizeInMbPretty = sizeInMb.toFixed(2) + 'MB'
+      console.log('Request size', sizeInMb)
+      if (sizeInMb > 9.99) {
+        return this.$toast.error(`Request is too large (${sizeInMbPretty}) should be < 10Mb`)
+      }
+
+      this.processing = true
+      this.$axios
+        .$post(`/api/podcasts/${this.libraryItem.id}/add-url-episodes`, episodesToAdd)
+        .then((response) => {
+          this.processing = false
+          const count = response.episodesAdded || 0
+          this.$toast.success(`Added ${count} episode${count !== 1 ? 's' : ''} as URL`)
+          this.show = false
+        })
+        .catch((error) => {
+          console.error('Failed to add URL episodes', error)
+          this.processing = false
+          this.$toast.error(error.response?.data || 'Failed to add URL episodes')
+
+          this.selectedEpisodes = {}
+          this.selectAll = false
+        })
+    },
     init() {
       this.updateDownloadedEpisodeMaps()
 
       this.episodesCleaned = this.episodes
         .filter((ep) => ep.enclosure?.url)
         .map((_ep) => {
+          const cleanUrl = this.getCleanEpisodeUrl(_ep.enclosure.url)
           return {
             ..._ep,
-            cleanUrl: this.getCleanEpisodeUrl(_ep.enclosure.url),
-            isDownloading: this.getIsEpisodeDownloadingOrQueued(_ep),
-            isDownloaded: this.getIsEpisodeDownloaded(_ep)
+            cleanUrl,
+            isDownloading: this.getIsEpisodeDownloadingOrQueued({ ..._ep, cleanUrl }),
+            isDownloaded: this.getIsEpisodeDownloaded({ ..._ep, cleanUrl }),
+            isUrlSource: this.getIsUrlSourceEpisode({ cleanUrl })
           }
         })
       this.episodesCleaned.sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1))
@@ -292,10 +338,17 @@ export default {
     updateDownloadedEpisodeMaps() {
       this.downloadedEpisodeGuidMap = {}
       this.downloadedEpisodeUrlMap = {}
+      this.urlSourceEpisodeMap = {}
 
       this.itemEpisodes.forEach((episode) => {
         if (episode.guid) this.downloadedEpisodeGuidMap[episode.guid] = episode.id
-        if (episode.enclosure?.url) this.downloadedEpisodeUrlMap[this.getCleanEpisodeUrl(episode.enclosure.url)] = episode.id
+        if (episode.enclosure?.url) {
+          const cleanUrl = this.getCleanEpisodeUrl(episode.enclosure.url)
+          this.downloadedEpisodeUrlMap[cleanUrl] = episode.id
+          if (episode.audioSourceType === 'url') {
+            this.urlSourceEpisodeMap[cleanUrl] = true
+          }
+        }
       })
     },
     updateEpisodeDownloadStatuses() {
@@ -304,7 +357,8 @@ export default {
         return {
           ...ep,
           isDownloading: this.getIsEpisodeDownloadingOrQueued(ep),
-          isDownloaded: this.getIsEpisodeDownloaded(ep)
+          isDownloaded: this.getIsEpisodeDownloaded(ep),
+          isUrlSource: this.getIsUrlSourceEpisode(ep)
         }
       })
     }

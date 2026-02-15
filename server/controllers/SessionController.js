@@ -310,6 +310,12 @@ class SessionController {
       return res.redirect(audioTrack.contentUrl)
     }
 
+    // Handle URL-only episodes (streams directly from enclosure URL)
+    if (audioTrack.isDirectUrl && audioTrack.contentUrl) {
+      Logger.debug(`[SessionController] Redirecting to direct URL for session "${req.params.id}": ${audioTrack.contentUrl}`)
+      return res.redirect(audioTrack.contentUrl)
+    }
+
     if (!audioTrack.metadata?.path) {
       Logger.error(`[SessionController] Invalid audio track "${audioTrack.index}" for session "${req.params.id}"`)
       return res.sendStatus(500)

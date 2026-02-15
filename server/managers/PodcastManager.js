@@ -237,8 +237,10 @@ class PodcastManager {
           await episodeToRemove.destroy()
           libraryItem.media.podcastEpisodes = libraryItem.media.podcastEpisodes.filter((ep) => ep.id !== episodeToRemove.id)
 
-          // Remove library file
-          libraryItem.libraryFiles = libraryItem.libraryFiles.filter((lf) => lf.ino !== episodeToRemove.audioFile.ino)
+          // Remove library file (only if episode has a local audio file)
+          if (episodeToRemove.audioFile) {
+            libraryItem.libraryFiles = libraryItem.libraryFiles.filter((lf) => lf.ino !== episodeToRemove.audioFile.ino)
+          }
         }
       }
     }

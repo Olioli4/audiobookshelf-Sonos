@@ -99,61 +99,8 @@
             <p aria-hidden="true" class="pl-4">{{ $strings.LabelSettingsChromecastSupport }}</p>
           </div>
 
-          <!-- Sonos Integration Settings -->
-          <div class="pt-4">
-            <h2 class="font-semibold">Sonos Integration</h2>
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch v-model="newServerSettings.sonosEnabled" label="Enable Sonos" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('sonosEnabled', val)" />
-            <ui-tooltip text="Enable streaming audiobooks to Sonos speakers via node-sonos-http-api">
-              <p class="pl-4">
-                <span>Enable Sonos Support</span>
-                <span class="material-symbols icon-text">info</span>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <div v-if="newServerSettings.sonosEnabled" class="ml-14 mb-2 space-y-2">
-            <ui-text-input-with-label v-model="newServerSettings.sonosApiUrl" label="Sonos HTTP API URL" placeholder="http://192.168.1.x:5005" class="max-w-80" @blur="updateSonosSettings" />
-            <p class="text-xs text-white/60">URL of your node-sonos-http-api server</p>
-
-            <ui-text-input-with-label v-model="newServerSettings.sonosServerUrl" label="Server URL for Sonos" placeholder="http://192.168.1.x:13378" class="max-w-80" @blur="updateSonosSettings" />
-            <p class="text-xs text-white/60">The server address that Sonos speakers can reach (your LAN IP)</p>
-
-            <div class="flex items-center pt-2">
-              <ui-btn small :loading="testingSonos" @click="testSonosConnection">
-                <span class="material-symbols text-sm mr-1">wifi_tethering</span>
-                Test Connection
-              </ui-btn>
-              <span v-if="sonosTestResult" class="ml-3 text-sm" :class="sonosTestResult.success ? 'text-success' : 'text-error'">
-                {{ sonosTestResult.message }}
-              </span>
-            </div>
-
-            <!-- Default Room Selection -->
-            <div v-if="sonosRooms.length" class="pt-4">
-              <label class="block text-sm font-medium mb-1">Default Room</label>
-              <select v-model="newServerSettings.sonosDefaultRoom" class="bg-primary border border-gray-600 rounded px-3 py-2 w-64" @change="updateSonosSettings">
-                <option :value="null">Select a default room...</option>
-                <option v-for="room in sonosRooms" :key="room.uuid" :value="room.name">{{ room.name }}</option>
-              </select>
-              <p class="text-xs text-white/60 mt-1">The room that will be automatically selected for playback</p>
-            </div>
-
-            <!-- Speaker Group Selection -->
-            <div v-if="sonosRooms.length && newServerSettings.sonosDefaultRoom" class="pt-4">
-              <label class="block text-sm font-medium mb-1">Group with these rooms</label>
-              <div class="flex flex-wrap gap-2">
-                <label v-for="room in sonosRooms.filter(r => r.name !== newServerSettings.sonosDefaultRoom)" :key="room.uuid" class="flex items-center bg-primary border border-gray-600 rounded px-3 py-2 cursor-pointer hover:bg-bg">
-                  <input type="checkbox" :checked="(newServerSettings.sonosDefaultGroup || []).includes(room.name)" @change="toggleGroupRoom(room.name)" class="mr-2" />
-                  <span>{{ room.name }}</span>
-                </label>
-              </div>
-              <p class="text-xs text-white/60 mt-1">These rooms will automatically join the default room when playing</p>
-            </div>
-          </div>
-          <!-- End Sonos Integration Settings -->
+          <!-- Sonos Integration Settings (extracted to component) -->
+          <app-sonos-settings-card :server-settings="serverSettings" class="mt-4" />
 
           <div class="flex items-center py-2 mb-2">
             <ui-toggle-switch v-model="newServerSettings.allowIframe" :label="$strings.LabelSettingsAllowIframe" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('allowIframe', val)" />
@@ -288,11 +235,7 @@ export default {
       hasPrefixesChanged: false,
       newServerSettings: {},
       showConfirmPurgeCache: false,
-      savingPrefixes: false,
-      // Sonos
-      testingSonos: false,
-      sonosTestResult: null,
-      sonosRooms: []
+      savingPrefixes: false
     }
   },
   watch: {
@@ -396,77 +339,6 @@ export default {
       this.newServerSettings.allowedOrigins = validOrigins
       this.updateSettingsKey('allowedOrigins', validOrigins)
     },
-    // Sonos methods
-    async updateSonosSettings() {
-      // Update all Sonos-related settings at once
-      const sonosSettings = {}
-      if (this.newServerSettings.sonosApiUrl !== this.serverSettings.sonosApiUrl) {
-        sonosSettings.sonosApiUrl = this.newServerSettings.sonosApiUrl
-      }
-      if (this.newServerSettings.sonosServerUrl !== this.serverSettings.sonosServerUrl) {
-        sonosSettings.sonosServerUrl = this.newServerSettings.sonosServerUrl
-      }
-      if (this.newServerSettings.sonosDefaultRoom !== this.serverSettings.sonosDefaultRoom) {
-        sonosSettings.sonosDefaultRoom = this.newServerSettings.sonosDefaultRoom
-      }
-      if (JSON.stringify(this.newServerSettings.sonosDefaultGroup) !== JSON.stringify(this.serverSettings.sonosDefaultGroup)) {
-        sonosSettings.sonosDefaultGroup = this.newServerSettings.sonosDefaultGroup
-      }
-      
-      if (Object.keys(sonosSettings).length > 0) {
-        this.sonosTestResult = null
-        await this.updateServerSettings(sonosSettings)
-      }
-    },
-    toggleGroupRoom(roomName) {
-      const group = [...(this.newServerSettings.sonosDefaultGroup || [])]
-      const index = group.indexOf(roomName)
-      if (index >= 0) {
-        group.splice(index, 1)
-      } else {
-        group.push(roomName)
-      }
-      this.newServerSettings.sonosDefaultGroup = group
-      this.updateSonosSettings()
-    },
-    async fetchSonosRooms() {
-      if (!this.newServerSettings.sonosEnabled || !this.newServerSettings.sonosApiUrl) {
-        this.sonosRooms = []
-        return
-      }
-      try {
-        const response = await this.$axios.$get('/api/sonos/zones')
-        // Use rooms array for individual speakers, fallback to zones for backward compatibility
-        this.sonosRooms = response.rooms || response.zones || []
-      } catch (error) {
-        console.error('Failed to fetch Sonos rooms:', error)
-        this.sonosRooms = []
-      }
-    },
-    async testSonosConnection() {
-      this.testingSonos = true
-      this.sonosTestResult = null
-
-      try {
-        const response = await this.$axios.$get('/api/sonos/zones')
-        // Use rooms array for individual speakers, fallback to zones for backward compatibility
-        const rooms = response.rooms || response.zones || []
-        const roomCount = rooms.length
-        this.sonosRooms = rooms
-        this.sonosTestResult = {
-          success: true,
-          message: roomCount > 0 ? `Connected! Found ${roomCount} room(s)` : 'Connected but no rooms found'
-        }
-      } catch (error) {
-        console.error('Sonos test failed:', error)
-        this.sonosTestResult = {
-          success: false,
-          message: error.response?.data?.error || 'Connection failed - check URL'
-        }
-      } finally {
-        this.testingSonos = false
-      }
-    },
     updateSettingsKey(key, val) {
       if (key === 'scannerDisableWatcher') {
         this.newServerSettings.scannerDisableWatcher = val
@@ -502,11 +374,6 @@ export default {
 
       this.homepageUseBookshelfView = this.newServerSettings.homeBookshelfView != this.$constants.BookshelfView.DETAIL
       this.useBookshelfView = this.newServerSettings.bookshelfView != this.$constants.BookshelfView.DETAIL
-      
-      // Fetch Sonos rooms if enabled
-      if (this.newServerSettings.sonosEnabled && this.newServerSettings.sonosApiUrl) {
-        this.fetchSonosRooms()
-      }
     },
     purgeCache() {
       this.showConfirmPurgeCache = true

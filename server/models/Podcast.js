@@ -304,6 +304,13 @@ class Podcast extends Model {
       Logger.error(`[Podcast] checkCanDirectPlay: episode not found`, episodeId)
       return false
     }
+    // URL episodes stream directly from enclosureURL - assume direct play is supported
+    if (episode.audioSourceType === 'url') {
+      return true
+    }
+    if (!episode.audioFile) {
+      return false
+    }
     return supportedMimeTypes.includes(episode.audioFile.mimeType)
   }
 

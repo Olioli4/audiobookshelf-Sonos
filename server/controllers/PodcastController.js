@@ -364,6 +364,73 @@ class PodcastController {
   }
 
   /**
+   * POST: /api/podcasts/:id/add-url-episodes
+   * Add episodes as URL references without downloading files
+   *
+   * @this {import('../routers/ApiRouter')}
+   *
+   * @param {RequestWithLibraryItem} req
+   * @param {Response} res
+   */
+  async addUrlEpisodes(req, res) {
+    if (!req.user.isAdminOrUp) {
+      Logger.error(`[PodcastController] Non-admin user "${req.user.username}" attempted to add URL episodes`)
+      return res.sendStatus(403)
+    }
+
+    const episodes = req.body
+    if (!Array.isArray(episodes) || !episodes.length) {
+      return res.sendStatus(400)
+    }
+
+    const libraryItem = await Database.libraryItemModel.getExpandedById(req.libraryItem.id)
+    if (!libraryItem) {
+      Logger.error(`[PodcastController] Library item not found ${req.libraryItem.id}`)
+      return res.status(404).send('Library item not found')
+    }
+
+    const addedEpisodes = []
+    for (const episodeData of episodes) {
+      if (!episodeData.enclosure?.url) {
+        Logger.warn(`[PodcastController] Episode missing enclosure URL: ${episodeData.title}`)
+        continue
+      }
+
+      // Check if episode already exists
+      const existingEpisode = libraryItem.media.podcastEpisodes.find((ep) => ep.checkMatchesGuidOrEnclosureUrl(episodeData.guid, episodeData.enclosure?.url))
+      if (existingEpisode) {
+        Logger.info(`[PodcastController] Episode already exists: ${episodeData.title}`)
+        continue
+      }
+
+      try {
+        const podcastEpisode = await Database.podcastEpisodeModel.createFromUrl(episodeData, libraryItem.media.id)
+        libraryItem.media.podcastEpisodes.push(podcastEpisode)
+        addedEpisodes.push(podcastEpisode.toOldJSONExpanded(libraryItem.id))
+        Logger.info(`[PodcastController] Added URL episode: ${podcastEpisode.title}`)
+      } catch (error) {
+        Logger.error(`[PodcastController] Failed to add URL episode: ${episodeData.title}`, error)
+      }
+    }
+
+    if (addedEpisodes.length > 0) {
+      // Update numEpisodes count
+      if (libraryItem.media.numEpisodes !== libraryItem.media.podcastEpisodes.length) {
+        libraryItem.media.numEpisodes = libraryItem.media.podcastEpisodes.length
+        await libraryItem.media.save()
+      }
+
+      SocketAuthority.libraryItemEmitter('item_updated', libraryItem)
+    }
+
+    res.json({
+      success: true,
+      episodesAdded: addedEpisodes.length,
+      episodes: addedEpisodes
+    })
+  }
+
+  /**
    * POST: /api/podcasts/:id/match-episodes
    *
    * @this {import('../routers/ApiRouter')}
@@ -476,7 +543,8 @@ class PodcastController {
     // Remove it from the podcastEpisodes array
     req.libraryItem.media.podcastEpisodes = req.libraryItem.media.podcastEpisodes.filter((ep) => ep.id !== episodeId)
 
-    if (hardDelete) {
+    // Only handle file deletion for local episodes (not URL episodes)
+    if (hardDelete && episode.audioFile) {
       const audioFile = episode.audioFile
       // TODO: this will trigger the watcher. should maybe handle this gracefully
       await fs
@@ -505,10 +573,12 @@ class PodcastController {
     // Remove episode
     await episode.destroy()
 
-    // Remove library file
-    req.libraryItem.libraryFiles = req.libraryItem.libraryFiles.filter((file) => file.ino !== episode.audioFile.ino)
-    req.libraryItem.changed('libraryFiles', true)
-    await req.libraryItem.save()
+    // Remove library file (only if episode has an audioFile)
+    if (episode.audioFile) {
+      req.libraryItem.libraryFiles = req.libraryItem.libraryFiles.filter((file) => file.ino !== episode.audioFile.ino)
+      req.libraryItem.changed('libraryFiles', true)
+      await req.libraryItem.save()
+    }
 
     // update number of episodes
     req.libraryItem.media.numEpisodes = req.libraryItem.media.podcastEpisodes.length

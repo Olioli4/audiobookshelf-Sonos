@@ -57,10 +57,15 @@ class PodcastScanner {
     /** @type {AudioFile[]} */
     let newAudioFiles = []
 
-    if (libraryItemData.hasAudioFileChanges || libraryItemData.audioLibraryFiles.length !== existingPodcastEpisodes.length) {
-      // Filter out and destroy episodes that were removed
+    // Filter to only local episodes for file-based operations (URL episodes have no audioFile)
+    const localEpisodes = existingPodcastEpisodes.filter((ep) => ep.audioFile)
+
+    if (libraryItemData.hasAudioFileChanges || libraryItemData.audioLibraryFiles.length !== localEpisodes.length) {
+      // Filter out and destroy episodes that were removed (only check local episodes)
       const episodesToRemove = []
       existingPodcastEpisodes = existingPodcastEpisodes.filter((ep) => {
+        // Skip URL episodes - they don't have local files to check
+        if (!ep.audioFile) return true
         if (libraryItemData.checkAudioFileRemoved(ep.audioFile)) {
           episodesToRemove.push(ep)
           return false
@@ -99,6 +104,9 @@ class PodcastScanner {
         )
 
         for (const podcastEpisode of existingPodcastEpisodes) {
+          // Skip URL episodes - they don't have local audio files
+          if (!podcastEpisode.audioFile) continue
+
           let matchedScannedAudioFile = scannedAudioFiles.find((saf) => saf.metadata.path === podcastEpisode.audioFile.metadata.path)
           if (!matchedScannedAudioFile) {
             matchedScannedAudioFile = scannedAudioFiles.find((saf) => saf.ino === podcastEpisode.audioFile.ino)
@@ -222,8 +230,9 @@ class PodcastScanner {
 
     // If no cover then extract cover from audio file if available
     if (!media.coverPath && existingPodcastEpisodes.length) {
-      const audioFiles = existingPodcastEpisodes.map((ep) => ep.audioFile)
-      const extractedCoverPath = await CoverManager.saveEmbeddedCoverArt(audioFiles, existingLibraryItem.id, existingLibraryItem.path)
+      // Only use local episodes with audio files for cover extraction
+      const audioFiles = existingPodcastEpisodes.filter((ep) => ep.audioFile).map((ep) => ep.audioFile)
+      const extractedCoverPath = audioFiles.length ? await CoverManager.saveEmbeddedCoverArt(audioFiles, existingLibraryItem.id, existingLibraryItem.path) : null
       if (extractedCoverPath) {
         libraryScan.addLog(LogLevel.DEBUG, `Updating podcast "${podcastMetadata.title}" extracted embedded cover art from audio file to path "${extractedCoverPath}"`)
         media.coverPath = extractedCoverPath
@@ -388,9 +397,10 @@ class PodcastScanner {
       genres: []
     }
 
-    // Use audio meta tags
-    if (podcastEpisodes.length) {
-      AudioFileScanner.setPodcastMetadataFromAudioMetaTags(podcastEpisodes[0].audioFile, podcastMetadata, libraryScan)
+    // Use audio meta tags (only from local episodes with audio files)
+    const episodeWithAudioFile = podcastEpisodes.find((ep) => ep.audioFile)
+    if (episodeWithAudioFile) {
+      AudioFileScanner.setPodcastMetadataFromAudioMetaTags(episodeWithAudioFile.audioFile, podcastMetadata, libraryScan)
     }
 
     // Use metadata.json file

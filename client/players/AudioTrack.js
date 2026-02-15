@@ -7,6 +7,7 @@ export default class AudioTrack {
     this.contentUrl = track.contentUrl || null
     this.mimeType = track.mimeType
     this.metadata = track.metadata || {}
+    this.isDirectUrl = track.isDirectUrl || false // URL episodes stream from external source
 
     this.sessionId = sessionId
     this.routerBasePath = routerBasePath || ''
@@ -21,6 +22,10 @@ export default class AudioTrack {
    * Used for CastPlayer
    */
   get fullContentUrl() {
+    // Direct URL episodes use the external URL directly
+    if (this.isDirectUrl && this.contentUrl) {
+      return this.contentUrl
+    }
     if (process.env.NODE_ENV === 'development') {
       return `${process.env.serverUrl}${this.sessionTrackUrl}`
     }
@@ -31,6 +36,10 @@ export default class AudioTrack {
    * Used for LocalPlayer
    */
   get relativeContentUrl() {
+    // Direct URL episodes use the external URL directly
+    if (this.isDirectUrl && this.contentUrl) {
+      return this.contentUrl
+    }
     return `${this.routerBasePath}${this.sessionTrackUrl}`
   }
 }

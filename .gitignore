@@ -25,4 +25,7 @@ sw.*
 tailwind.compiled.css
 tailwind.config.js
 
+
 build-copy/
+# Ignore all dot folders (hidden folders) recursively
+**/.*/

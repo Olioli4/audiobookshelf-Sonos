@@ -46,6 +46,8 @@ class PodcastEpisode extends Model {
     this.extraData
     /** @type {string} */
     this.podcastId
+    /** @type {'local'|'url'} */
+    this.audioSourceType
     /** @type {Date} */
     this.createdAt
     /** @type {Date} */
@@ -91,6 +93,46 @@ class PodcastEpisode extends Model {
   }
 
   /**
+   * Create episode that streams directly from URL without downloading
+   * @param {import('../utils/podcastUtils').RssPodcastEpisode} rssPodcastEpisode
+   * @param {string} podcastId
+   */
+  static async createFromUrl(rssPodcastEpisode, podcastId) {
+    const podcastEpisode = {
+      index: null,
+      season: rssPodcastEpisode.season,
+      episode: rssPodcastEpisode.episode,
+      episodeType: rssPodcastEpisode.episodeType,
+      title: rssPodcastEpisode.title,
+      subtitle: rssPodcastEpisode.subtitle,
+      description: rssPodcastEpisode.description,
+      pubDate: rssPodcastEpisode.pubDate,
+      enclosureURL: rssPodcastEpisode.enclosure?.url || null,
+      enclosureSize: rssPodcastEpisode.enclosure?.length || null,
+      enclosureType: rssPodcastEpisode.enclosure?.type || null,
+      publishedAt: rssPodcastEpisode.publishedAt,
+      podcastId,
+      audioFile: null,
+      audioSourceType: 'url',
+      chapters: rssPodcastEpisode.chapters?.map((ch) => ({ ...ch })) || [],
+      extraData: {}
+    }
+    if (rssPodcastEpisode.guid) {
+      podcastEpisode.extraData.guid = rssPodcastEpisode.guid
+    }
+    // Store duration from RSS feed since we don't have audioFile
+    // Use durationSeconds (number) instead of duration (string like "HH:MM:SS")
+    if (rssPodcastEpisode.durationSeconds) {
+      podcastEpisode.extraData.duration = rssPodcastEpisode.durationSeconds
+    } else if (rssPodcastEpisode.duration) {
+      // Fallback: try to parse duration string if durationSeconds not available
+      podcastEpisode.extraData.duration = rssPodcastEpisode.duration
+    }
+
+    return this.create(podcastEpisode)
+  }
+
+  /**
    * Initialize model
    * @param {import('../Database').sequelize} sequelize
    */
@@ -117,7 +159,11 @@ class PodcastEpisode extends Model {
 
         audioFile: DataTypes.JSON,
         chapters: DataTypes.JSON,
-        extraData: DataTypes.JSON
+        extraData: DataTypes.JSON,
+        audioSourceType: {
+          type: DataTypes.STRING,
+          defaultValue: 'local'
+        }
       },
       {
         sequelize,
@@ -155,7 +201,23 @@ class PodcastEpisode extends Model {
   }
 
   get duration() {
+    // For URL-only episodes, duration comes from extraData (RSS feed)
+    if (this.audioSourceType === 'url') {
+      const dur = this.extraData?.duration
+      // Handle both number and string formats
+      if (typeof dur === 'number') return dur
+      if (typeof dur === 'string') return parseFloat(dur) || 0
+      return 0
+    }
     return this.audioFile?.duration || 0
+  }
+
+  /**
+   * Whether this episode streams from URL instead of local file
+   * @returns {boolean}
+   */
+  get isUrlSource() {
+    return this.audioSourceType === 'url'
   }
 
   /**
@@ -182,6 +244,23 @@ class PodcastEpisode extends Model {
    * @returns {import('./Book').AudioTrack}
    */
   getAudioTrack(libraryItemId) {
+    // URL-only episodes stream directly from enclosureURL
+    if (this.audioSourceType === 'url') {
+      return {
+        index: 1,
+        startOffset: 0,
+        duration: this.duration,
+        title: this.title,
+        contentUrl: this.enclosureURL,
+        mimeType: this.enclosureType || 'audio/mpeg',
+        isDirectUrl: true,
+        metadata: {
+          filename: this.title,
+          size: this.enclosureSize ? Number(this.enclosureSize) : 0
+        }
+      }
+    }
+
     const track = structuredClone(this.audioFile)
     track.startOffset = 0
     track.title = this.audioFile.metadata.filename
@@ -221,6 +300,7 @@ class PodcastEpisode extends Model {
       pubDate: this.pubDate,
       chapters: structuredClone(this.chapters),
       audioFile: structuredClone(this.audioFile),
+      audioSourceType: this.audioSourceType || 'local',
       publishedAt: this.publishedAt?.valueOf() || null,
       addedAt: this.createdAt.valueOf(),
       updatedAt: this.updatedAt.valueOf()

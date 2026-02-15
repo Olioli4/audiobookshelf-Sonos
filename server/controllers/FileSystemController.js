@@ -39,23 +39,51 @@ class FileSystemController {
 
     let directories = []
 
-    // Windows returns drives first
+    // Windows returns drives and special folders first
     if (global.isWin) {
       if (relpath) {
         directories = await fileUtils.getDirectoriesInPath(relpath, level)
       } else {
+        // Get special folders (Music, Documents, etc.)
+        const specialFolders = await fileUtils.getWindowsSpecialFolders().catch((error) => {
+          Logger.error(`[FileSystemController] Failed to get windows special folders`, error)
+          return []
+        })
+
+        // Get mapped network drives
+        const networkDrives = await fileUtils.getWindowsNetworkDrives().catch((error) => {
+          Logger.error(`[FileSystemController] Failed to get windows network drives`, error)
+          return []
+        })
+
+        // Get local drives
         const drives = await fileUtils.getWindowsDrives().catch((error) => {
           Logger.error(`[FileSystemController] Failed to get windows drives`, error)
           return []
         })
+
+        // Add special folders first
+        directories = [...specialFolders]
+
+        // Then add network drives (if any)
+        if (networkDrives.length) {
+          directories.push(...networkDrives)
+        }
+
+        // Then add local drives (exclude drives that are network mapped)
+        const networkDrivePaths = new Set(networkDrives.map((d) => d.path))
         if (drives.length) {
-          directories = drives.map((d) => {
-            return {
-              path: d,
-              dirname: d,
-              level: 0
-            }
-          })
+          directories.push(
+            ...drives
+              .filter((d) => !networkDrivePaths.has(d))
+              .map((d) => {
+                return {
+                  path: d,
+                  dirname: d,
+                  level: 0
+                }
+              })
+          )
         }
       }
     } else {

@@ -294,7 +294,8 @@ export default {
       this.$store.commit('user/updateMediaProgress', payload)
 
       if (payload.data) {
-        if (this.$store.getters['getIsMediaStreaming'](payload.data.libraryItemId, payload.data.episodeId) && this.$store.state.playbackSessionId !== payload.sessionId) {
+        const isOurSession = this.$store.state.playbackSessionId === payload.sessionId || this.$store.state.sonosSessionId === payload.sessionId
+        if (this.$store.getters['getIsMediaStreaming'](payload.data.libraryItemId, payload.data.episodeId) && !isOurSession) {
           this.multiSessionOtherSessionId = payload.sessionId
           this.multiSessionCurrentSessionId = this.$store.state.playbackSessionId
           console.log(`Media progress was updated from another session (${this.multiSessionOtherSessionId}) for currently open media. Device description=${payload.deviceDescription}. Current session id=${this.multiSessionCurrentSessionId}`)

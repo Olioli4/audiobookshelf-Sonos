@@ -61,6 +61,16 @@ class ServerSettings {
     this.sonosServerUrl = null
     this.sonosDefaultRoom = null
     this.sonosDefaultGroup = []
+    // Sonos Timing Configuration (Advanced)
+    this.sonosSeekInitialDelayMs = 3000
+    this.sonosSeekRetryDelayMs = 2000
+    this.sonosPositionToleranceSeconds = 10
+    this.sonosGroupFormationDelayMs = 500
+    this.sonosMaxSeekAttempts = 3
+    this.sonosRequestTimeoutMs = 10000
+    this.sonosPostSeekResumeDelayMs = 500
+    this.sonosGroupCommandDelayMs = 200
+    this.sonosPollIntervalMs = 1000
 
     this.logLevel = Logger.logLevel
 
@@ -136,6 +146,16 @@ class ServerSettings {
     this.sonosServerUrl = settings.sonosServerUrl || null
     this.sonosDefaultRoom = settings.sonosDefaultRoom || null
     this.sonosDefaultGroup = settings.sonosDefaultGroup || []
+    // Sonos Timing Configuration (Advanced)
+    this.sonosSeekInitialDelayMs = !isNaN(settings.sonosSeekInitialDelayMs) ? Number(settings.sonosSeekInitialDelayMs) : 3000
+    this.sonosSeekRetryDelayMs = !isNaN(settings.sonosSeekRetryDelayMs) ? Number(settings.sonosSeekRetryDelayMs) : 2000
+    this.sonosPositionToleranceSeconds = !isNaN(settings.sonosPositionToleranceSeconds) ? Number(settings.sonosPositionToleranceSeconds) : 10
+    this.sonosGroupFormationDelayMs = !isNaN(settings.sonosGroupFormationDelayMs) ? Number(settings.sonosGroupFormationDelayMs) : 500
+    this.sonosMaxSeekAttempts = !isNaN(settings.sonosMaxSeekAttempts) ? Number(settings.sonosMaxSeekAttempts) : 3
+    this.sonosRequestTimeoutMs = !isNaN(settings.sonosRequestTimeoutMs) ? Number(settings.sonosRequestTimeoutMs) : 10000
+    this.sonosPostSeekResumeDelayMs = !isNaN(settings.sonosPostSeekResumeDelayMs) ? Number(settings.sonosPostSeekResumeDelayMs) : 500
+    this.sonosGroupCommandDelayMs = !isNaN(settings.sonosGroupCommandDelayMs) ? Number(settings.sonosGroupCommandDelayMs) : 200
+    this.sonosPollIntervalMs = !isNaN(settings.sonosPollIntervalMs) ? Number(settings.sonosPollIntervalMs) : 1000
 
     this.logLevel = settings.logLevel || Logger.logLevel
     this.version = settings.version || null
@@ -250,6 +270,15 @@ class ServerSettings {
       sonosServerUrl: this.sonosServerUrl,
       sonosDefaultRoom: this.sonosDefaultRoom,
       sonosDefaultGroup: [...this.sonosDefaultGroup],
+      sonosSeekInitialDelayMs: this.sonosSeekInitialDelayMs,
+      sonosSeekRetryDelayMs: this.sonosSeekRetryDelayMs,
+      sonosPositionToleranceSeconds: this.sonosPositionToleranceSeconds,
+      sonosGroupFormationDelayMs: this.sonosGroupFormationDelayMs,
+      sonosMaxSeekAttempts: this.sonosMaxSeekAttempts,
+      sonosRequestTimeoutMs: this.sonosRequestTimeoutMs,
+      sonosPostSeekResumeDelayMs: this.sonosPostSeekResumeDelayMs,
+      sonosGroupCommandDelayMs: this.sonosGroupCommandDelayMs,
+      sonosPollIntervalMs: this.sonosPollIntervalMs,
       dateFormat: this.dateFormat,
       timeFormat: this.timeFormat,
       language: this.language,

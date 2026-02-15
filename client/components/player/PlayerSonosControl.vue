@@ -88,6 +88,7 @@ export default {
       isOperationPending: false,
       connectionError: false,
       pollFailCount: 0,
+      pollCount: 0,
       sonosRooms: [],
       selectedRoom: null,
       sonosStatus: null,
@@ -111,20 +112,57 @@ export default {
     },
     defaultGroup() {
       return this.sonosStatus?.defaultGroup || []
+    },
+    pollIntervalMs() {
+      // Get configurable poll interval from server settings, default 1000ms
+      return this.$store.state.serverSettings?.sonosPollIntervalMs || 1000
     }
   },
   async mounted() {
     // Check Sonos status on mount
     await this.checkSonosStatus()
+    // Stop Sonos playback when page is closed/reloaded
+    window.addEventListener('beforeunload', this.handleBeforeUnload)
   },
   beforeDestroy() {
+    window.removeEventListener('beforeunload', this.handleBeforeUnload)
     this.stopPolling()
+    // Stop Sonos playback when component is destroyed
+    if (this.isSonosMode && this.selectedRoom) {
+      this.stopSonosPlayback()
+    }
   },
   methods: {
+    handleBeforeUnload() {
+      // Stop Sonos playback on page unload using fetch with keepalive
+      if (this.isSonosMode && this.selectedRoom) {
+        const stopUrl = `/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/stop`
+        const token = this.$store.getters['user/getToken']
+        const headers = { 'Content-Type': 'application/json' }
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+        }
+        // Use fetch with keepalive for reliable delivery during page unload
+        fetch(stopUrl, {
+          method: 'POST',
+          keepalive: true,
+          headers,
+          credentials: 'same-origin'
+        }).catch(() => {})
+      }
+    },
+    async stopSonosPlayback() {
+      if (!this.selectedRoom) return
+      try {
+        await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/stop`)
+      } catch (e) {
+        console.warn('Failed to stop Sonos playback:', e)
+      }
+    },
     startPolling() {
       if (this.pollInterval) return
-      // Poll every 2 seconds for Sonos state
-      this.pollInterval = setInterval(() => this.pollSonosState(), 2000)
+      // Poll for Sonos state using configurable interval
+      this.pollInterval = setInterval(() => this.pollSonosState(), this.pollIntervalMs)
     },
     stopPolling() {
       if (this.pollInterval) {
@@ -137,26 +175,33 @@ export default {
       try {
         const state = await this.$axios.$get(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/state`)
         const isPlaying = state?.playbackState === 'PLAYING'
-        
+
         // Reset connection error on successful poll
         if (this.connectionError || this.pollFailCount > 0) {
           this.connectionError = false
           this.pollFailCount = 0
           console.log('[SonosControl] Connection restored')
         }
-        
+
         console.log('[SonosControl] pollSonosState:', state?.playbackState, 'elapsedTime:', state?.elapsedTime, 'trackStartOffset:', this.trackStartOffset, 'isPlaying:', isPlaying, 'was:', this.sonosIsPlaying)
 
         // Always emit time update for position sync - convert to total time using trackStartOffset
         if (typeof state?.elapsedTime === 'number') {
           const totalTime = this.trackStartOffset + state.elapsedTime
           this.$emit('sonos-time-update', { currentTime: totalTime, duration: state?.currentTrack?.duration || 0 })
-          
+
+          // Sync progress to server every 10 polls (10 seconds) while playing
+          this.pollCount++
+          if (isPlaying && this.pollCount >= 10) {
+            this.pollCount = 0
+            this.syncProgressToServer()
+          }
+
           // Detect track completion for multi-track audiobooks
           // If playback stopped and we're near the end of the track, advance to next track
           if (this.trackCount > 1 && !isPlaying && this.sonosIsPlaying) {
             const trackEndThreshold = 3 // within 3 seconds of track end
-            const nearTrackEnd = this.trackDuration > 0 && (this.trackDuration - state.elapsedTime) < trackEndThreshold
+            const nearTrackEnd = this.trackDuration > 0 && this.trackDuration - state.elapsedTime < trackEndThreshold
             if (nearTrackEnd) {
               const nextTrackStart = this.trackStartOffset + this.trackDuration
               console.log(`[SonosControl] Track completed, advancing to next track at position ${nextTrackStart}`)
@@ -185,7 +230,7 @@ export default {
       } catch (error) {
         this.pollFailCount++
         console.error('[SonosControl] Polling error:', error.message, 'failCount:', this.pollFailCount)
-        
+
         // After 3 consecutive failures, show connection error
         if (this.pollFailCount >= 3 && !this.connectionError) {
           this.connectionError = true
@@ -205,6 +250,9 @@ export default {
       if (!this.sonosEnabled) return
 
       if (this.isSonosMode) {
+        // Sync progress before switching away
+        await this.syncProgressToServer()
+
         // Get current Sonos position before stopping
         let currentPosition = 0
         try {
@@ -226,7 +274,10 @@ export default {
         this.sonosIsPlaying = false
         this.selectedRoom = null
         this.trackStartOffset = 0
+        this.pollCount = 0
         this.stopPolling()
+        // Clear Sonos session ID from store
+        this.$store.commit('setSonosSessionId', null)
         this.$emit('output-changed', { type: 'browser', currentTime: currentPosition })
         this.$toast.info('Switched to browser playback')
       } else {
@@ -333,7 +384,7 @@ export default {
 
       this.isOperationPending = true
       try {
-        const startTime = overrideStartTime !== null ? overrideStartTime : (this.currentTime || 0)
+        const startTime = overrideStartTime !== null ? overrideStartTime : this.currentTime || 0
         console.log(`[SonosControl] playOnSonos called: startTime=${startTime}, libraryItemId=${this.libraryItemId}, episodeId=${this.episodeId}`)
 
         const payload = {
@@ -356,8 +407,9 @@ export default {
         this.trackCount = response?.trackCount || 1
         console.log('[SonosControl] Stored trackStartOffset:', this.trackStartOffset, 'trackDuration:', this.trackDuration, 'trackCount:', this.trackCount)
 
-        // Emit session info so PlayerHandler can track it
+        // Store Sonos session ID in Vuex so progress updates don't trigger "another session" warning
         if (response?.sessionId) {
+          this.$store.commit('setSonosSessionId', response.sessionId)
           this.$emit('sonos-session-started', { sessionId: response.sessionId })
         }
 
@@ -372,7 +424,7 @@ export default {
     async sonosPlay() {
       if (!this.selectedRoom) return
       if (this.isOperationPending) return
-      
+
       this.isOperationPending = true
       try {
         await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/play`)
@@ -388,7 +440,7 @@ export default {
     async sonosPause() {
       if (!this.selectedRoom) return
       if (this.isOperationPending) return
-      
+
       this.isOperationPending = true
       try {
         await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/pause`)
@@ -401,22 +453,33 @@ export default {
         this.isOperationPending = false
       }
     },
+    async syncProgressToServer() {
+      if (!this.selectedRoom) return
+      try {
+        const result = await this.$axios.$post(`/api/sonos/room/${encodeURIComponent(this.selectedRoom)}/sync`)
+        if (result?.synced) {
+          console.log(`[SonosControl] Progress synced to server: ${result.currentTime}s`)
+        }
+      } catch (error) {
+        console.warn('[SonosControl] Failed to sync progress:', error.message)
+      }
+    },
     async sonosSeek(position) {
       if (!this.selectedRoom) return
       if (this.isOperationPending) return
-      
+
       // For multi-track audiobooks, check if seeking to a different track
       if (this.trackCount > 1) {
         const trackEndOffset = this.trackStartOffset + this.trackDuration
         const isWithinCurrentTrack = position >= this.trackStartOffset && position < trackEndOffset
-        
+
         if (!isWithinCurrentTrack) {
           // Cross-track seek - need to reload stream with correct track
           console.log(`[SonosControl] Cross-track seek: position=${position}, current track range=[${this.trackStartOffset}, ${trackEndOffset})`)
           await this.playOnSonos(position)
           return
         }
-        
+
         // Within current track - convert total position to track-relative
         const trackRelativePosition = position - this.trackStartOffset
         console.log(`[SonosControl] Within-track seek: total=${position}, trackRelative=${trackRelativePosition}`)
@@ -433,7 +496,7 @@ export default {
         }
         return
       }
-      
+
       // Single-track - seek directly
       this.isOperationPending = true
       try {

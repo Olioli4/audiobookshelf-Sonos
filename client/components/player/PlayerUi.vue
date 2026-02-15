@@ -43,7 +43,7 @@
         </ui-tooltip>
 
         <!-- Sonos Output Control -->
-        <player-sonos-control ref="sonosControl" :library-item-id="libraryItemId" :episode-id="episodeId" :current-time="currentTime" @output-changed="onOutputChanged" @sonos-state-changed="onSonosStateChanged" />
+        <player-sonos-control ref="sonosControl" :library-item-id="libraryItemId" :episode-id="episodeId" :current-time="currentTime" @output-changed="onOutputChanged" @sonos-state-changed="onSonosStateChanged" @sonos-time-update="onSonosTimeUpdate" />
       </div>
 
       <player-playback-controls :loading="loading" :seek-loading="seekLoading" :playback-rate.sync="playbackRate" :paused="paused" :hasNextChapter="hasNextChapter" :hasNextItemInQueue="hasNextItemInQueue" @prevChapter="prevChapter" @next="goToNext" @jumpForward="jumpForward" @jumpBackward="jumpBackward" @setPlaybackRate="setPlaybackRate" @playPause="playPause" />
@@ -201,6 +201,12 @@ export default {
     onSonosStateChanged(data) {
       // Propagate Sonos play/pause state to parent
       this.$emit('sonosStateChanged', data)
+    },
+    onSonosTimeUpdate(data) {
+      // Update UI with Sonos playback position
+      if (typeof data?.currentTime === 'number') {
+        this.setCurrentTime(data.currentTime)
+      }
     },
     toggleFullscreen(isFullscreen) {
       this.$store.commit('setPlayerIsFullscreen', isFullscreen)

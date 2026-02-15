@@ -500,6 +500,82 @@ module.exports.getWindowsDrives = async () => {
 }
 
 /**
+ * Get Windows special folders (Music, Documents, Downloads, etc.)
+ *
+ * @returns {Promise<{ path: string, dirname: string, level: number, isSpecialFolder: boolean }[]>}
+ */
+module.exports.getWindowsSpecialFolders = async () => {
+  if (!global.isWin) {
+    return []
+  }
+
+  const specialFolders = [
+    { name: 'Desktop', envVar: 'USERPROFILE', subPath: 'Desktop' },
+    { name: 'Documents', envVar: 'USERPROFILE', subPath: 'Documents' },
+    { name: 'Downloads', envVar: 'USERPROFILE', subPath: 'Downloads' },
+    { name: 'Music', envVar: 'USERPROFILE', subPath: 'Music' },
+    { name: 'Pictures', envVar: 'USERPROFILE', subPath: 'Pictures' },
+    { name: 'Videos', envVar: 'USERPROFILE', subPath: 'Videos' }
+  ]
+
+  const folders = []
+  for (const folder of specialFolders) {
+    const basePath = process.env[folder.envVar]
+    if (basePath) {
+      const fullPath = filePathToPOSIX(Path.join(basePath, folder.subPath))
+      if (await fs.pathExists(fullPath)) {
+        folders.push({
+          path: fullPath,
+          dirname: folder.name,
+          level: 0,
+          isSpecialFolder: true
+        })
+      }
+    }
+  }
+  return folders
+}
+
+/**
+ * Get Windows mapped network drives (e.g., Z: -> \\server\share)
+ *
+ * @returns {Promise<{ path: string, dirname: string, level: number, isNetworkDrive: boolean, uncPath: string }[]>}
+ */
+module.exports.getWindowsNetworkDrives = async () => {
+  if (!global.isWin) {
+    return []
+  }
+  return new Promise((resolve) => {
+    // Get network drives with their UNC paths
+    exec('powershell -Command "Get-WmiObject Win32_MappedLogicalDisk | Select-Object DeviceID, ProviderName | ConvertTo-Json"', (error, stdout, stderr) => {
+      if (error) {
+        Logger.debug(`[fileUtils] Failed to get network drives: ${error.message}`)
+        resolve([])
+        return
+      }
+      try {
+        let drives = JSON.parse(stdout || '[]')
+        // Handle single result (not array)
+        if (!Array.isArray(drives)) {
+          drives = drives ? [drives] : []
+        }
+        const networkDrives = drives.map((drive) => ({
+          path: filePathToPOSIX(drive.DeviceID + '/'),
+          dirname: `${drive.DeviceID} (${drive.ProviderName})`,
+          level: 0,
+          isNetworkDrive: true,
+          uncPath: drive.ProviderName
+        }))
+        resolve(networkDrives)
+      } catch (e) {
+        Logger.debug(`[fileUtils] Failed to parse network drives: ${e.message}`)
+        resolve([])
+      }
+    })
+  })
+}
+
+/**
  * Get array of directory paths in a directory
  *
  * @param {string} dirPath

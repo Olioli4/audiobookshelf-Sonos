@@ -5,6 +5,7 @@
         <div dir="auto" class="flex items-center">
           <span class="text-sm font-semibold">{{ episodeTitle }}</span>
           <widgets-podcast-type-indicator :type="episodeType" />
+          <span v-if="isUrlSource" class="material-symbols text-warning text-sm ml-1" title="Streaming from URL">cloud</span>
         </div>
 
         <div class="h-10 flex items-center mt-1.5 mb-0.5 overflow-hidden">
@@ -12,7 +13,7 @@
         </div>
 
         <div class="h-8 flex items-center">
-          <p v-if="sortKey === 'audioFile.metadata.filename'" class="text-sm text-gray-300 truncate font-light">
+          <p v-if="sortKey === 'audioFile.metadata.filename' && episode.audioFile" class="text-sm text-gray-300 truncate font-light">
             <strong className="font-bold">{{ $strings.LabelFilename }}</strong
             >: {{ episode.audioFile.metadata.filename }}
           </p>
@@ -107,6 +108,9 @@ export default {
     },
     episodeType() {
       return this.episode?.episodeType || ''
+    },
+    isUrlSource() {
+      return this.episode?.audioSourceType === 'url'
     },
     publishedAt() {
       return this.episode?.publishedAt

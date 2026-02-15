@@ -393,7 +393,9 @@ class LibraryItemController {
         Logger.debug(`Use X-Accel to serve static file ${encodedURI}`)
         return res.status(204).header({ 'X-Accel-Redirect': encodedURI }).send()
       }
-      return res.sendFile(coverPath)
+      // Ensure absolute path for sendFile
+      const absoluteCoverPath = Path.isAbsolute(coverPath) ? coverPath : Path.resolve(coverPath)
+      return res.sendFile(absoluteCoverPath)
     }
 
     const options = {
@@ -978,8 +980,8 @@ class LibraryItemController {
       if (!req.libraryItem.media.hasMediaFiles) {
         req.libraryItem.isMissing = true
       }
-    } else if (req.libraryItem.media.podcastEpisodes.some((ep) => ep.audioFile.ino === req.params.fileid)) {
-      const episodeToRemove = req.libraryItem.media.podcastEpisodes.find((ep) => ep.audioFile.ino === req.params.fileid)
+    } else if (req.libraryItem.media.podcastEpisodes.some((ep) => ep.audioFile?.ino === req.params.fileid)) {
+      const episodeToRemove = req.libraryItem.media.podcastEpisodes.find((ep) => ep.audioFile?.ino === req.params.fileid)
       // Remove episode from all playlists
       await Database.playlistModel.removeMediaItemsFromPlaylists([episodeToRemove.id])
 
@@ -996,7 +998,7 @@ class LibraryItemController {
       // Remove episode
       await episodeToRemove.destroy()
 
-      req.libraryItem.media.podcastEpisodes = req.libraryItem.media.podcastEpisodes.filter((ep) => ep.audioFile.ino !== req.params.fileid)
+      req.libraryItem.media.podcastEpisodes = req.libraryItem.media.podcastEpisodes.filter((ep) => ep.audioFile?.ino !== req.params.fileid)
     }
 
     if (req.libraryItem.media.changed()) {

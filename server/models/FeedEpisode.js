@@ -56,6 +56,11 @@ class FeedEpisode extends Model {
    * @param {string} [existingEpisodeId]
    */
   static getFeedEpisodeObjFromPodcastEpisode(libraryItemExpanded, feed, slug, episode, existingEpisodeId = null) {
+    // URL episodes cannot be included in RSS feeds - they have no local file
+    if (!episode.audioFile) {
+      return null
+    }
+
     const episodeId = existingEpisodeId || uuidv4()
     return {
       id: episodeId,
@@ -97,13 +102,19 @@ class FeedEpisode extends Model {
 
     let numExisting = 0
     for (const episode of libraryItemExpanded.media.podcastEpisodes) {
+      // Skip URL episodes - they cannot be included in RSS feeds
+      if (!episode.audioFile) continue
+
       // Check for existing episode by filepath
       const existingEpisode = feed.feedEpisodes?.find((feedEpisode) => {
         return feedEpisode.filePath === episode.audioFile.metadata.path
       })
       numExisting = existingEpisode ? numExisting + 1 : numExisting
 
-      feedEpisodeObjs.push(this.getFeedEpisodeObjFromPodcastEpisode(libraryItemExpanded, feed, slug, episode, existingEpisode?.id))
+      const feedEpisodeObj = this.getFeedEpisodeObjFromPodcastEpisode(libraryItemExpanded, feed, slug, episode, existingEpisode?.id)
+      if (feedEpisodeObj) {
+        feedEpisodeObjs.push(feedEpisodeObj)
+      }
     }
     Logger.info(`[FeedEpisode] Upserting ${feedEpisodeObjs.length} episodes for feed ${feed.id} (${numExisting} existing)`)
     return this.bulkCreate(feedEpisodeObjs, { transaction, updateOnDuplicate: ['title', 'author', 'description', 'siteURL', 'enclosureURL', 'enclosureType', 'enclosureSize', 'pubDate', 'season', 'episode', 'episodeType', 'duration', 'filePath', 'explicit'] })

@@ -558,7 +558,7 @@ export default {
               title: episode.title,
               subtitle: this.title,
               caption: episode.publishedAt ? this.$getString('LabelPublishedDate', [this.$formatDate(episode.publishedAt, this.dateFormat)]) : this.$strings.LabelUnknownPublishDate,
-              duration: episode.audioFile.duration || null,
+              duration: episode.duration || null,
               coverPath: this.libraryItem.media.coverPath || null
             })
           }
