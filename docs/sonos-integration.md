@@ -11,12 +11,12 @@ Audiobookshelf supports streaming audiobooks and podcasts to Sonos speakers via 
 
 Navigate to **Settings** → **Sonos** tab to configure:
 
-| Setting | Description | Example |
-|---------|-------------|---------|
-| **Sonos API URL** | URL of your sonos-http-api instance | `http://192.168.1.100:5005` |
-| **Server URL** | Your Audiobookshelf server URL accessible from Sonos | `http://192.168.1.50:13378` |
-| **Default Room** | Room to use when auto-playing | `Living Room` |
-| **Auto Group** | Automatically group all speakers when playing | checkbox |
+| Setting           | Description                                          | Example                     |
+| ----------------- | ---------------------------------------------------- | --------------------------- |
+| **Sonos API URL** | URL of your sonos-http-api instance                  | `http://192.168.1.100:5005` |
+| **Server URL**    | Your Audiobookshelf server URL accessible from Sonos | `http://192.168.1.50:13378` |
+| **Default Room**  | Room to use when auto-playing                        | `Living Room`               |
+| **Auto Group**    | Automatically group all speakers when playing        | checkbox                    |
 
 ### Important: Server URL
 
@@ -35,12 +35,12 @@ The **Server URL** must be the LAN IP address of your Audiobookshelf server, not
 
 When streaming to Sonos, the player controls behave differently:
 
-| Control | Behavior |
-|---------|----------|
-| **Play/Pause** | Controls Sonos playback |
-| **Seek** | Seeks on the Sonos speaker |
-| **Volume** | Adjusts Sonos speaker volume |
-| **Skip** | Skips chapters (if available) |
+| Control        | Behavior                      |
+| -------------- | ----------------------------- |
+| **Play/Pause** | Controls Sonos playback       |
+| **Seek**       | Seeks on the Sonos speaker    |
+| **Volume**     | Adjusts Sonos speaker volume  |
+| **Skip**       | Skips chapters (if available) |
 
 ### Resume Position
 
@@ -55,9 +55,11 @@ The Sonos integration exposes the following REST API endpoints:
 ```
 GET /api/sonos/rooms
 ```
+
 Returns list of available Sonos rooms/zones.
 
 **Response:**
+
 ```json
 {
   "rooms": ["Living Room", "Kitchen", "Bedroom"]
@@ -69,9 +71,11 @@ Returns list of available Sonos rooms/zones.
 ```
 GET /api/sonos/room/:roomName
 ```
+
 Returns current playback state for a room.
 
 **Response:**
+
 ```json
 {
   "roomName": "Living Room",
@@ -97,6 +101,7 @@ Content-Type: application/json
   "startTime": 3600         // optional, seek position in seconds
 }
 ```
+
 Starts playback of a library item on the specified room.
 
 ### Playback Controls
@@ -139,11 +144,13 @@ POST /api/sonos/room/:roomName/unmute
 ```
 POST /api/sonos/room/:roomName/group-all
 ```
+
 Groups all speakers with the specified room as coordinator.
 
 ```
 POST /api/sonos/room/:roomName/ungroup
 ```
+
 Removes room from its current group.
 
 ## Architecture
@@ -194,10 +201,10 @@ Removes room from its current group.
 
 ## Implementation Files
 
-| File | Description |
-|------|-------------|
-| `server/routers/SonosRouter.js` | REST API endpoints |
-| `server/libs/sonos/SonosIntegration.js` | Sonos HTTP API client |
-| `server/libs/sonos/BaseStreamTarget.js` | Abstract base class for streaming targets |
-| `client/components/player/PlayerSonosControl.vue` | Sonos player controls |
-| `server/objects/settings/ServerSettings.js` | Sonos configuration settings |
+| File                                              | Description                               |
+| ------------------------------------------------- | ----------------------------------------- |
+| `server/routers/SonosRouter.js`                   | REST API endpoints                        |
+| `server/libs/sonos/SonosIntegration.js`           | Sonos HTTP API client                     |
+| `server/libs/sonos/BaseStreamTarget.js`           | Abstract base class for streaming targets |
+| `client/components/player/PlayerSonosControl.vue` | Sonos player controls                     |
+| `server/objects/settings/ServerSettings.js`       | Sonos configuration settings              |
