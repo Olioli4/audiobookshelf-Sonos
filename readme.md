@@ -2,17 +2,7 @@
 
 > **A fork of Audiobookshelf with native Sonos speaker support**
 
-Stream your audiobooks and podcasts to any Sonos speaker in your home while syncing your reading progress.
-
----
-
-## ✨ What Can You Do?
-
-| Feature                   | Description                                                     |
-| ------------------------- | --------------------------------------------------------------- |
-| 🎧 **One-Click Playback** | Tap the speaker icon and your audiobook starts playing on Sonos |
-| 🏠 **Multi-Room Audio**   | Group multiple speakers for whole-home listening                |
-| ⏱️ **Position Sync**      | Resume where you left off when switching to Sonos               |
+Stream your audiobooks and podcasts to any Sonos speaker in your home.
 
 ---
 
@@ -23,161 +13,69 @@ Stream your audiobooks and podcasts to any Sonos speaker in your home while sync
 This bridge connects Audiobookshelf to your Sonos system:
 
 ```bash
-# Clone and run
 git clone https://github.com/jishi/node-sonos-http-api.git
 cd node-sonos-http-api
 npm install
 npm start
 ```
 
-The API will auto-discover your Sonos speakers on port `5005`.
+The API auto-discovers your Sonos speakers on port `5005`.
 
-### 2. Configure Audiobookshelf
+### 2. Configure in Settings
 
-Navigate to **Settings** → scroll to **Sonos Integration**:
+Navigate to **Settings** → **Sonos Integration**:
 
-1. **Enable** Sonos speaker output
-2. Enter your **Sonos API URL**: `http://<sonos-api-ip>:5005`
-3. Enter your **Server URL**: `http://<audiobookshelf-ip>:13378`
-4. Click **Test Connection** ✓
+| Setting               | Description                                                         |
+| --------------------- | ------------------------------------------------------------------- |
+| **Enable**            | Toggle Sonos output on/off                                          |
+| **Sonos HTTP API URL**| URL of node-sonos-http-api (e.g., `http://192.168.1.100:5005`)      |
+| **Server URL**        | Your Audiobookshelf URL that Sonos can reach (LAN IP, not localhost)|
+| **Test Connection**   | Verifies API is reachable and discovers speakers                    |
+| **Select Speakers**   | Check one or multiple speakers (multiple = grouped playback)        |
 
-> ⚠️ **Important**: Use your server's LAN IP address, not `localhost`. Sonos speakers need to reach your server directly.
+> ⚠️ **Server URL** must be your LAN IP (e.g., `http://192.168.1.50:13378`). Sonos speakers fetch audio directly from your server.
 
 ### 3. Play!
 
-1. Open any audiobook or podcast
-2. Click the **🔊 speaker icon** in the player bar
-3. Select your Sonos room
-4. Enjoy!
+Click the **🔊 speaker icon** in the player bar → playback starts on your configured Sonos speaker(s).
 
 ---
 
-## 🎛️ Player Controls
+## ⚙️ Advanced Timing Settings
 
-When streaming to Sonos, all controls work as expected:
-
-| Control           | Action                                       |
-| ----------------- | -------------------------------------------- |
-| ▶️ **Play/Pause** | Start or pause Sonos playback                |
-| ⏪ ⏩ **Skip**    | Jump between chapters                        |
-| 🔊 **Volume**     | Adjust Sonos speaker volume (slider appears) |
-| ⏱️ **Seek**       | Jump to any position in the track            |
-| 🔄 **Speed**      | Playback speed (1x, 1.5x, 2x)                |
-
-The player bar shows a **green speaker icon** when actively streaming to Sonos.
-
----
-
-## 🏠 Multi-Room & Grouping
-
-### Single Room
-
-Select one room from the list — audio plays on that speaker only.
-
-### Grouped Speakers
-
-In **Settings → Sonos**, check multiple speakers to create a group:
-
-- All selected speakers play in sync
-- The first speaker becomes the "coordinator"
-- Volume is controlled per-speaker or all together
-
-### Existing Groups
-
-If your speakers are already grouped in the Sonos app, Audiobookshelf respects that grouping. Select the group coordinator to play on all grouped speakers.
-
----
-
-## ⚙️ Advanced Settings
-
-For fine-tuning playback behavior, expand **Advanced Timing Configuration** in settings:
+Expand **Advanced Timing Configuration** if you have network issues:
 
 | Setting                | Default | Purpose                                  |
 | ---------------------- | ------- | ---------------------------------------- |
 | Seek Initial Delay     | 500ms   | Wait before seeking after play starts    |
 | Seek Retry Delay       | 300ms   | Delay between seek retry attempts        |
-| Position Tolerance     | 3s      | Acceptable difference in resume position |
-| Max Seek Attempts      | 3       | How many times to retry seeking          |
-| Post-Seek Resume Delay | 200ms   | Wait after seek before resuming          |
+| Position Tolerance     | 3s      | Acceptable position difference           |
+| Max Seek Attempts      | 3       | Retry count for seeking                  |
 | Group Formation Delay  | 1000ms  | Wait for speakers to group               |
-
-> 💡 **Tip**: If seeking doesn't work reliably on your network, try increasing the delays.
+| Request Timeout        | 5000ms  | HTTP request timeout                     |
+| Poll Interval          | 1000ms  | State polling frequency                  |
 
 ---
 
 ## 🔧 Troubleshooting
 
-### No Sonos rooms appear
+**No speakers appear?**
+- Check node-sonos-http-api is running: `http://<api-ip>:5005/zones`
+- Verify all devices on same network subnet
 
-- Verify node-sonos-http-api is running: visit `http://<api-ip>:5005/zones`
-- Check the Sonos API URL in settings
-- Ensure all devices are on the same network subnet
+**No audio?**
+- Server URL must be reachable from Sonos (use LAN IP)
+- Check firewall allows port 13378
 
-### "Check sonosServerUrl" error
-
-- Your **Server URL** must be reachable from Sonos speakers
-- Use your LAN IP (e.g., `192.168.1.50`), not `localhost`
-- Check firewall allows connections on port 13378
-
-### Playback starts but no audio
-
-- Verify the Server URL is correct and accessible
-- Try: `curl http://<your-server>:13378/api/ping` from another device
-
-### Position doesn't resume correctly
-
-- Increase **Seek Initial Delay** to 1000ms
-- This gives Sonos time to buffer before seeking
+**Seeking doesn't work?**
+- Increase Seek Initial Delay to 1000ms+
 
 ---
 
-## 🛠️ For Developers
+## 📝 About
 
-### Architecture
+Fork of [Audiobookshelf](https://github.com/advplyr/audiobookshelf) v2.32.1 with Sonos integration.
 
-```
-┌─────────────────────┐
-│   Browser Client    │
-│  (Vue.js Frontend)  │
-└──────────┬──────────┘
-           │ WebSocket + REST
-           ▼
-┌─────────────────────┐         ┌─────────────────────┐
-│   Audiobookshelf    │────────▶│  node-sonos-http-   │
-│       Server        │  REST   │        api          │
-└──────────┬──────────┘         └──────────┬──────────┘
-           │                               │
-           │ HTTP Stream                   │ UPnP/SOAP
-           ▼                               ▼
-    ┌─────────────────────────────────────────┐
-    │            Sonos Speaker(s)             │
-    │  ← fetches audio directly from server   │
-    └─────────────────────────────────────────┘
-```
+**Repository**: [github.com/Olioli4/audiobookshelf-Sonos](https://github.com/Olioli4/audiobookshelf-Sonos)
 
-### Key Source Files
-
-| File                                              | Purpose                       |
-| ------------------------------------------------- | ----------------------------- |
-| `server/routers/SonosRouter.js`                   | REST API endpoint definitions |
-| `server/integrations/SonosIntegration.js`         | Sonos HTTP API client wrapper |
-| `client/components/player/PlayerSonosControl.vue` | Player UI component           |
-| `client/components/app/SonosSettingsCard.vue`     | Settings panel                |
-
-See [docs/sonos-integration.md](docs/sonos-integration.md) for full API documentation.
-
----
-
-## 📝 About This Fork
-
-This is a fork of [Audiobookshelf](https://github.com/advplyr/audiobookshelf) v2.32.1 that adds Sonos speaker integration.
-
-**Fork Repository**: [github.com/Olioli4/audiobookshelf-Sonos](https://github.com/Olioli4/audiobookshelf-Sonos)
-
-Licensed under GPL-3.0.
-
----
-
-<p align="center">
-  <b>Made with ❤️ for audiobook lovers who want great sound</b>
-</p>
+GPL-3.0 License
