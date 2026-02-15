@@ -1,8 +1,8 @@
 {
-  "name": "audiobookshelf",
-  "version": "2.32.1",
-  "buildNumber": 4,
-  "description": "Self-hosted audiobook and podcast server",
+  "name": "audiobookshelf-sonos",
+  "version": "1.0.0",
+  "buildNumber": 1,
+  "description": "Self-hosted audiobook and podcast server with Sonos integration",
   "main": "index.js",
   "scripts": {
     "dev": "nodemon --watch server index.js -- --dev",

@@ -2,19 +2,17 @@
 
 > **A fork of Audiobookshelf with native Sonos speaker support**
 
-Stream your audiobooks and podcasts to any Sonos speaker in your home while keeping perfect sync with your reading progress.
+Stream your audiobooks and podcasts to any Sonos speaker in your home while syncing your reading progress.
 
 ---
 
 ## ✨ What Can You Do?
 
-| Feature                      | Description                                                     |
-| ---------------------------- | --------------------------------------------------------------- |
-| 🎧 **One-Click Playback**    | Tap the speaker icon and your audiobook starts playing on Sonos |
-| 🏠 **Multi-Room Audio**      | Group multiple speakers for whole-home listening                |
-| ⏱️ **Perfect Position Sync** | Resume exactly where you left off, on any device                |
-| 🔄 **Seamless Switching**    | Move between browser, phone, and Sonos mid-chapter              |
-| 📊 **Progress Tracking**     | All listening time counts toward your statistics                |
+| Feature                   | Description                                                     |
+| ------------------------- | --------------------------------------------------------------- |
+| 🎧 **One-Click Playback** | Tap the speaker icon and your audiobook starts playing on Sonos |
+| 🏠 **Multi-Room Audio**   | Group multiple speakers for whole-home listening                |
+| ⏱️ **Position Sync**      | Resume where you left off when switching to Sonos               |
 
 ---
 
