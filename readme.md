@@ -47,13 +47,13 @@ npm start
 
 Navigate to **Settings** → **Sonos Integration**:
 
-| Setting               | Description                                                         |
-| --------------------- | ------------------------------------------------------------------- |
-| **Enable**            | Toggle Sonos output on/off                                          |
-| **Sonos HTTP API URL**| URL of the API (`http://localhost:5005` for Docker)                 |
-| **Server URL**        | Your Audiobookshelf URL that Sonos can reach (LAN IP, not localhost)|
-| **Test Connection**   | Verifies API is reachable and discovers speakers                    |
-| **Select Speakers**   | Check one or multiple speakers (multiple = grouped playback)        |
+| Setting                | Description                                                          |
+| ---------------------- | -------------------------------------------------------------------- |
+| **Enable**             | Toggle Sonos output on/off                                           |
+| **Sonos HTTP API URL** | URL of the API (`http://localhost:5005` for Docker)                  |
+| **Server URL**         | Your Audiobookshelf URL that Sonos can reach (LAN IP, not localhost) |
+| **Test Connection**    | Verifies API is reachable and discovers speakers                     |
+| **Select Speakers**    | Check one or multiple speakers (multiple = grouped playback)         |
 
 > ⚠️ **Server URL** must be your LAN IP (e.g., `http://192.168.1.50:13378`). Sonos speakers fetch audio directly from your server.
 
@@ -61,31 +61,33 @@ Navigate to **Settings** → **Sonos Integration**:
 
 ## ▶️ Usage
 
-Click the **🔊 speaker icon** in the player bar → playback starts on your configured Sonos speaker(s).
+Click the \*\*🔊 Play in the player bar → playback starts → tap the speaker on the right to switch to/from Sonos
 
 ---
 
 ## 🔧 Advanced Timing Settings
 
-Expand **Advanced Timing Configuration** in settings if you have network issues:
+Expand **Advanced Timing Configuration** in settings if you have network issues or want to tweak :
 
-| Setting                | Default | Purpose                                  |
-| ---------------------- | ------- | ---------------------------------------- |
-| Seek Initial Delay     | 500ms   | Wait before seeking after play starts    |
-| Seek Retry Delay       | 300ms   | Delay between seek retry attempts        |
-| Position Tolerance     | 3s      | Acceptable position difference           |
-| Max Seek Attempts      | 3       | Retry count for seeking                  |
-| Group Formation Delay  | 1000ms  | Wait for speakers to group               |
+| Setting               | Default | Purpose                               |
+| --------------------- | ------- | ------------------------------------- |
+| Seek Initial Delay    | 500ms   | Wait before seeking after play starts |
+| Seek Retry Delay      | 300ms   | Delay between seek retry attempts     |
+| Position Tolerance    | 3s      | Acceptable position difference        |
+| Max Seek Attempts     | 3       | Retry count for seeking               |
+| Group Formation Delay | 1000ms  | Wait for speakers to group            |
 
 ---
 
 ## 🐛 Troubleshooting
 
 **No speakers appear?**
+
 - Check node-sonos-http-api is running: `http://<api-ip>:5005/zones`
 - Verify all devices on same network subnet
 
 **No audio?**
+
 - Server URL must be reachable from Sonos (use LAN IP)
 - Check firewall allows port 13378
 
