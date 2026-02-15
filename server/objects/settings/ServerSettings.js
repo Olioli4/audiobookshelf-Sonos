@@ -140,10 +140,10 @@ class ServerSettings {
     this.language = settings.language || 'en-us'
     this.allowedOrigins = settings.allowedOrigins || []
 
-    // Sonos Integration
-    this.sonosEnabled = !!settings.sonosEnabled
-    this.sonosApiUrl = settings.sonosApiUrl || null
-    this.sonosServerUrl = settings.sonosServerUrl || null
+    // Sonos Integration - env vars take precedence for Docker/container deployments
+    this.sonosEnabled = process.env.SONOS_API_URL ? true : !!settings.sonosEnabled
+    this.sonosApiUrl = process.env.SONOS_API_URL || settings.sonosApiUrl || null
+    this.sonosServerUrl = process.env.SONOS_SERVER_URL || settings.sonosServerUrl || null
     this.sonosDefaultRoom = settings.sonosDefaultRoom || null
     this.sonosDefaultGroup = settings.sonosDefaultGroup || []
     // Sonos Timing Configuration (Advanced)
